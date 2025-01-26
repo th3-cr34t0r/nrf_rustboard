@@ -1,0 +1,16 @@
+[package]
+name = "nrf_rustboard"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.84"
+[dependencies]
+embassy-executor = { version = "0.7.0", features = ["arch-cortex-m", "defmt", "executor-thread"] }
+embassy-nrf = { version = "0.3.1", features = ["defmt", "nrf52840", "gpiote"] }
+embassy-time = "0.4.0"
+
+defmt = "0.3.10"
+
+cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
+panic-probe = { version = "0.3.2", features = ["print-defmt"] }
+cortex-m-rt = "0.7.5"
+defmt-rtt = "0.4.1"
