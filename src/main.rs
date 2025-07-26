@@ -11,10 +11,14 @@ use {defmt_rtt as _, panic_probe as _};
 async fn main(_spawner: Spawner) {
     let peripheral = embassy_nrf::init(Default::default());
 
-    let mut led = Output::new(peripheral.P0_13, Level::Low, OutputDrive::Standard);
+    let mut bled = Output::new(peripheral.P0_15, Level::Low, OutputDrive::Standard);
+
+    bled.set_low();
+
+    Timer::after_millis(5000).await;
 
     loop {
-        led.toggle();
-        Timer::after_millis(300).await;
+        bled.toggle();
+        Timer::after_millis(1000).await;
     }
 }

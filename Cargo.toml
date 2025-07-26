@@ -5,8 +5,8 @@ edition = "2021"
 rust-version = "1.84"
 [dependencies]
 embassy-executor = { version = "0.7.0", features = ["arch-cortex-m", "defmt", "executor-thread"] }
-embassy-nrf = { version = "0.3.1", features = ["defmt", "nrf52840", "gpiote"] }
-embassy-time = "0.4.0"
+embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-nrf = { version = "0.5", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac", "time"] }
 
 defmt = "0.3.10"
 

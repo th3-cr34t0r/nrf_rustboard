@@ -1,1 +1,3 @@
 target/
+nrf_rustboard.hex
+nrf_rustboard.uf2
