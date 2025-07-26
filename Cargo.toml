@@ -1,8 +1,8 @@
 [package]
 name = "nrf_rustboard"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.84"
+edition = "2024"
+rust-version = "1.88"
 [dependencies]
 embassy-executor = { version = "0.7.0", features = ["arch-cortex-m", "defmt", "executor-thread"] }
 embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime"] }
