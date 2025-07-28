@@ -43,11 +43,14 @@ bind_interrupts!(struct Irqs{
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let peripheral = embassy_nrf::init(Default::default());
+    let p = embassy_nrf::init(Default::default());
+
+    let usb_driver = Driver::new(p.USBD, Irqs, HardwareVbusDetect::new(Irqs));
+    let usb = usb_builder(usb_driver);
 
     let mut hid_state = HidState::new();
-    let mut btn = Input::new(peripheral.P0_17, Pull::Up);
-    let mut led = Output::new(peripheral.P0_15, Level::Low, OutputDrive::Standard);
+    let mut btn = Input::new(p.P0_17, Pull::Up);
+    let mut led = Output::new(p.P0_15, Level::Low, OutputDrive::Standard);
 
     // let mut usb_hid =
     // UsbBuilder::new(&mut build_descriptors, &mut device_handler, &mut hid_state).await;
@@ -65,9 +68,6 @@ async fn main(_spawner: Spawner) {
 fn usb_builder<'a>(
     driver: Driver<'a, USBD, HardwareVbusDetect>,
 ) -> Builder<'a, Driver<'a, USBD, HardwareVbusDetect>> {
-    // let p = embassy_nrf::init(Default::default());
-    // create the driver
-    // let driver = Driver::new(p.USBD, Irqs, HardwareVbusDetect::new(Irqs));
     // let config = ClassConfig {
     //     report_descriptor: KeyboardReport::desc(),
     //     request_handler: None,
