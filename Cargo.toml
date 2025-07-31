@@ -26,3 +26,7 @@ rand_chacha = { version = "0.3", default-features = false }
 panic-probe = { version = "0.3.2", features = ["print-defmt"] }
 usbd-hid = "0.8.2"
 static_cell = "2.1.1"
+trouble-host = { version = "0.2.4", features = ["defmt"] }
+
+[profile.release]
+debug = 2

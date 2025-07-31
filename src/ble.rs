@@ -16,6 +16,10 @@ use nrf_sdc::{
 };
 use static_cell::StaticCell;
 
+use trouble_host::prelude::service::HUMAN_INTERFACE_DEVICE;
+use trouble_host::prelude::*;
+use usbd_hid::descriptor;
+
 bind_interrupts!(struct Irqs {
     RNG => rng::InterruptHandler<RNG>;
     EGU0_SWI0 => LowPrioInterruptHandler;
@@ -27,6 +31,17 @@ bind_interrupts!(struct Irqs {
 
 /// Default memory allocation for softdevice controller in bytes.
 const SDC_MEMORY_SIZE: usize = 1112; // bytes
+
+#[gatt_server]
+struct Server {
+    hid_service: HidService,
+}
+
+#[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
+struct HidService {
+    #[characteristic(uuid = HUMAN_INTERFACE_DEVICE, read, notify)]
+    key_report: [u8; 6],
+}
 
 pub struct BleControllerBuilder<'a> {
     sdc_p: sdc_Peripherals<'a>,
