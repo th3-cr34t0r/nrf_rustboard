@@ -15,10 +15,11 @@ use nrf_sdc::{
     },
 };
 use static_cell::StaticCell;
+use trouble_host::gap::{CentralConfig, GapConfig};
+use trouble_host::prelude::appearance;
 
-use trouble_host::prelude::service::HUMAN_INTERFACE_DEVICE;
-use trouble_host::prelude::*;
-use usbd_hid::descriptor;
+use crate::ble::ble_server::{BleHidServer, Server};
+mod ble_server;
 
 bind_interrupts!(struct Irqs {
     RNG => rng::InterruptHandler<RNG>;
@@ -31,17 +32,6 @@ bind_interrupts!(struct Irqs {
 
 /// Default memory allocation for softdevice controller in bytes.
 const SDC_MEMORY_SIZE: usize = 1112; // bytes
-
-#[gatt_server]
-struct Server {
-    hid_service: HidService,
-}
-
-#[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
-struct HidService {
-    #[characteristic(uuid = HUMAN_INTERFACE_DEVICE, read, notify)]
-    key_report: [u8; 6],
-}
 
 pub struct BleControllerBuilder<'a> {
     sdc_p: sdc_Peripherals<'a>,
@@ -155,6 +145,18 @@ where
 
         Ok((sdc, mpsl))
     }
+}
+/// Run BLE
+pub async fn run(sdc: SoftdeviceController<'static>, mpls: MultiprotocolServiceLayer<'static>) {
+    let server = Server::new_with_config(GapConfig::Central(CentralConfig {
+        name: "NrfRustboard",
+        appearance: &appearance::human_interface_device::KEYBOARD,
+    }))
+    .expect("Failed to create GATT Server");
+
+    let service = BleHidServer::new(server);
+
+    // TODO: implement an advertiser
 }
 
 #[embassy_executor::task]
