@@ -1,3 +1,5 @@
+use defmt::info;
+use embassy_executor::Spawner;
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::{self, RNG};
 use embassy_nrf::{Peri, bind_interrupts, rng};
@@ -6,6 +8,7 @@ use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
     MPSL_RECOMMENDED_RC_CTIV, MPSL_RECOMMENDED_RC_TEMP_CTIV,
 };
+use nrf_sdc::Error;
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{
     self as sdc, Mem, Peripherals as sdc_Peripherals, SoftdeviceController,
@@ -16,7 +19,14 @@ use nrf_sdc::{
 };
 use static_cell::StaticCell;
 use trouble_host::gap::{CentralConfig, GapConfig};
-use trouble_host::prelude::appearance;
+use trouble_host::gatt::GattConnection;
+use trouble_host::prelude::{
+    AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, Central, DefaultPacketPool,
+    LE_GENERAL_DISCOVERABLE, Peripheral, Runner, appearance,
+};
+use trouble_host::{
+    Address, BleHostError, Controller, Host, HostResources, PacketPool, Stack, central,
+};
 
 use crate::ble::ble_server::{BleHidServer, Server};
 mod ble_server;
@@ -146,25 +156,99 @@ where
         Ok((sdc, mpsl))
     }
 }
+
+const BLE_NAME: &str = "nRFRustboard";
+const CONNS: usize = 2;
+const CHANNELS: usize = 1;
+const ADV_SETS: usize = 2;
+
+type BleHostResources = HostResources<DefaultPacketPool, CONNS, CHANNELS, ADV_SETS>;
+
 /// Run BLE
-pub async fn run(sdc: SoftdeviceController<'static>, mpls: MultiprotocolServiceLayer<'static>) {
+pub async fn run(
+    sdc: SoftdeviceController<'static>,
+    mpsl: MultiprotocolServiceLayer<'static>,
+    spawner: Spawner,
+) {
+    // ble address
+    let address = Address::random([0xff, 0x16, 0x56, 0x8f, 0x24, 0xff]);
+
+    let resources = {
+        static RESOURCES: StaticCell<BleHostResources> = StaticCell::new();
+        RESOURCES.init(BleHostResources::new())
+    };
+
+    let stack = {
+        static STACK: StaticCell<Stack<'_, SoftdeviceController<'_>, DefaultPacketPool>> =
+            StaticCell::new();
+        STACK.init(trouble_host::new(sdc, resources).set_random_address(address))
+    };
+
+    let Host {
+        mut central,
+        mut peripheral,
+        runner,
+        ..
+    } = stack.build();
+
+    // run the mpsl task
+    spawner.must_spawn(mpsl_task(mpsl));
+    // run the host task
+    spawner.must_spawn(host_task(runner));
+
     let server = Server::new_with_config(GapConfig::Central(CentralConfig {
-        name: "NrfRustboard",
+        name: BLE_NAME,
         appearance: &appearance::human_interface_device::KEYBOARD,
     }))
     .expect("Failed to create GATT Server");
 
-    let service = BleHidServer::new(server);
+    // let service = BleHidServer::new(server);
 
     // TODO: implement an advertiser
+
+    loop {
+        match advertise(&mut peripheral, &server).await {
+            Ok(connection) => info!("Connected"),
+            Err(e) => info!("{}", e),
+        }
+    }
+}
+
+async fn advertise<'a, 'b>(
+    peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
+    server: &'b Server<'_>,
+) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
+    let mut ad_data = [0u8; 8];
+    let ad_len = AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::ServiceUuids16(&[ble_server::HUMAN_INTERFACE_DEVICE.into()]),
+            AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
+        ],
+        &mut ad_data[..],
+    )?;
+
+    let advertiser = peripheral
+        .advertise(
+            &Default::default(),
+            Advertisement::ConnectableScannableUndirected {
+                adv_data: &ad_data[..ad_len],
+                scan_data: &[],
+            },
+        )
+        .await
+        .unwrap();
+
+    let connection = advertiser.accept().await?.with_attribute_server(server)?;
+    Ok(connection)
 }
 
 #[embassy_executor::task]
-pub async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
+async fn mpsl_task(mpsl: MultiprotocolServiceLayer<'static>) -> ! {
     mpsl.run().await;
 }
 
 #[embassy_executor::task]
-pub async fn sdc_task(sdc: &'static SoftdeviceController<'static>) -> ! {
-    loop {}
+async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
+    runner.run().await.expect("Host task failed to run");
 }
