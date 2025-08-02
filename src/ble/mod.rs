@@ -1,9 +1,10 @@
 use defmt::{error, info};
 use embassy_executor::Spawner;
+use embassy_futures::select::{self, select};
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::{self, RNG};
 use embassy_nrf::{Peri, bind_interrupts, rng};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, with_timeout};
 use nrf_mpsl::Peripherals as mpsl_Peripherals;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
@@ -22,7 +23,7 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha12Rng;
 use static_cell::StaticCell;
 use trouble_host::gap::{CentralConfig, GapConfig};
-use trouble_host::gatt::GattConnection;
+use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
 use trouble_host::prelude::{
     AdStructure, Advertisement, AdvertisementParameters, BR_EDR_NOT_SUPPORTED, Central,
     DefaultPacketPool, LE_GENERAL_DISCOVERABLE, Peripheral, PhyKind, Runner, TxPower, appearance,
@@ -44,7 +45,7 @@ bind_interrupts!(struct Irqs {
 });
 
 /// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 1120; // bytes
+const SDC_MEMORY_SIZE: usize = 2816; // bytes
 
 pub struct BleControllerBuilder<'a> {
     sdc_p: sdc_Peripherals<'a>,
@@ -70,13 +71,35 @@ where
         skip_wait_lfclk_started: MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
     };
 
+    /// How many outgoing L2CAP buffers per link
+    const L2CAP_TXQ: u8 = 3;
+
+    /// How many incoming L2CAP buffers per link
+    const L2CAP_RXQ: u8 = 3;
+
+    /// Size of L2CAP packets
+    const L2CAP_MTU: usize = 251;
+
     fn build_sdc<'d, const N: usize>(
         p: nrf_sdc::Peripherals<'d>,
         rng: &'d mut rng::Rng<RNG, Async>,
         mpsl: &'d MultiprotocolServiceLayer,
         mem: &'d mut sdc::Mem<N>,
     ) -> Result<SoftdeviceController<'d>, nrf_sdc::Error> {
-        sdc::Builder::new()?.support_adv()?.build(p, rng, mpsl, mem)
+        sdc::Builder::new()?
+            .support_adv()?
+            .support_peripheral()?
+            .support_dle_peripheral()?
+            .support_phy_update_peripheral()?
+            .support_le_2m_phy()?
+            .peripheral_count(1)?
+            .buffer_cfg(
+                Self::L2CAP_MTU as u16,
+                Self::L2CAP_MTU as u16,
+                Self::L2CAP_TXQ,
+                Self::L2CAP_RXQ,
+            )?
+            .build(p, rng, mpsl, mem)
     }
     pub(crate) fn new(
         ppi_ch17: Peri<'a, peripherals::PPI_CH17>,
@@ -199,7 +222,7 @@ pub async fn run<RNG>(
     };
 
     let Host {
-        mut central,
+        // mut central,
         mut peripheral,
         runner,
         ..
@@ -221,10 +244,21 @@ pub async fn run<RNG>(
     // advertiser
     loop {
         match advertise(&mut peripheral, &server).await {
-            Ok(connection) => info!("Connected"),
+            Ok(connection) => {
+                info!("Connected");
+
+                let gatt_events_task = gatt_events_handler(&connection, &server);
+
+                select(gatt_events_task, async {
+                    loop {
+                        Timer::after_millis(100).await
+                    }
+                })
+                .await;
+            }
             Err(e) => {
                 error!("{}", e);
-                Timer::after_millis(500).await;
+                // Timer::after_millis(500).await;
             }
         }
     }
@@ -236,7 +270,7 @@ async fn advertise<'a, 'b>(
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
     let mut advertiser_data = [0; 31];
 
-    let ad_len = AdStructure::encode_slice(
+    AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             AdStructure::ServiceUuids16(&[
@@ -253,9 +287,6 @@ async fn advertise<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
-    info!("[debug] ad_len: {}", ad_len);
-
-    info!("[debug] advertise_config");
     let advertise_config = AdvertisementParameters {
         primary_phy: PhyKind::Le2M,
         secondary_phy: PhyKind::Le2M,
@@ -265,7 +296,6 @@ async fn advertise<'a, 'b>(
         ..Default::default()
     };
 
-    info!("[debug] advertiser");
     let advertiser = peripheral
         .advertise(
             &advertise_config,
@@ -276,9 +306,44 @@ async fn advertise<'a, 'b>(
         )
         .await?;
 
-    info!("[debug] connection");
-    let connection = advertiser.accept().await?.with_attribute_server(server)?;
-    Ok(connection)
+    match with_timeout(Duration::from_millis(300), advertiser.accept()).await {
+        Ok(connection_result) => {
+            let connection = connection_result?.with_attribute_server(server)?;
+            info!("Connection established");
+            Ok(connection)
+        }
+        Err(_) => Err(BleHostError::BleHost(trouble_host::Error::Timeout)),
+    }
+}
+
+async fn gatt_events_handler<'stack, 'server>(
+    connection: &GattConnection<'stack, 'server, DefaultPacketPool>,
+    server: &'server Server<'_>,
+) {
+    let reason = loop {
+        match connection.next().await {
+            GattConnectionEvent::Gatt { event } => {
+                match &event {
+                    GattEvent::Read(event) => {
+                        let char_handle = event.handle();
+                        info!("Characteristic handle read: {}", char_handle);
+                    }
+                    GattEvent::Write(event) => {}
+                    _ => {}
+                };
+                match event.accept() {
+                    Ok(reply) => reply.send().await,
+                    Err(e) => {
+                        error!("error sending response {:?}", e)
+                    }
+                };
+            }
+            GattConnectionEvent::Disconnected { reason } => break reason,
+            _ => {}
+        }
+    };
+
+    error!("Disconnected reason: {}", reason);
 }
 
 #[embassy_executor::task]

@@ -11,8 +11,8 @@ embassy-sync = "0.7.0"
 embassy-futures = "0.1.1"
 
 nrf-mpsl = { version = "0.1.1", features = ["defmt", "critical-section-impl"] }
-nrf-sdc = { version = "0.1.1", features = ["peripheral", "defmt", "nrf52840", "central"] }
-trouble-host = { version = "0.2.4", features = ["defmt", "scan", "gatt"] }
+nrf-sdc = { version = "0.1.1", features = ["peripheral", "defmt", "nrf52840",] }
+trouble-host = { version = "0.2.4", features = ["defmt", "scan", "gatt", "peripheral"] }
 
 defmt = "0.3.10"
 defmt-rtt = "0.4.1"
