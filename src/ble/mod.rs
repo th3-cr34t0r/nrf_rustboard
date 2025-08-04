@@ -1,3 +1,4 @@
+use ble_server::KeyboardReport;
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::select::{self, select};
@@ -31,6 +32,8 @@ use trouble_host::prelude::{
 use trouble_host::{
     Address, BleHostError, Controller, Host, HostResources, PacketPool, Stack, central,
 };
+
+use ssmarshal;
 
 use crate::ble::ble_server::{BleHidServer, Server};
 mod ble_server;
@@ -251,7 +254,23 @@ pub async fn run<RNG>(
 
                 select(gatt_events_task, async {
                     loop {
-                        Timer::after_millis(100).await
+                        let mut key_report = KeyboardReport::default();
+                        key_report.keycodes[0] = 4;
+
+                        let mut buf = [0; 8];
+
+                        // serialize the key_report
+                        let n = ssmarshal::serialize(&mut buf, &key_report).unwrap();
+
+                        // send keypress
+                        server
+                            .hid_service
+                            .input_keyboard
+                            .notify(&connection, &buf)
+                            .await
+                            .unwrap();
+
+                        Timer::after_millis(1000).await
                     }
                 })
                 .await;
@@ -331,6 +350,7 @@ async fn gatt_events_handler<'stack, 'server>(
                     GattEvent::Write(event) => {}
                     _ => {}
                 };
+
                 match event.accept() {
                     Ok(reply) => reply.send().await,
                     Err(e) => {

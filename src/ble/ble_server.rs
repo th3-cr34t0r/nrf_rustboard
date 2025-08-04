@@ -7,8 +7,8 @@ pub const BATTERY: BluetoothUuid16 = BluetoothUuid16::new(0x180f);
 
 #[gatt_server]
 pub struct Server {
-    battery_service: BatteryService,
-    hid_service: HidService,
+    pub battery_service: BatteryService,
+    pub hid_service: HidService,
 }
 
 #[gatt_service(uuid = service::BATTERY)]
@@ -19,11 +19,13 @@ pub struct BatteryService {
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub struct HidService {
     #[characteristic(uuid = "2a4b", read, value = KeyboardReport::desc().try_into().expect("Failed to convert keyboard report to [u8; 67]"))]
-    report_map: [u8; 67],
+    pub(crate) report_map: [u8; 67],
+    #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
     #[characteristic(uuid = "2a22", read, notify)]
-    input_keyboard: [u8; 8],
+    pub(crate) input_keyboard: [u8; 8],
+    #[descriptor(uuid = "2908", read, value = [0u8, 2u8])]
     #[characteristic(uuid = "2a32", read, write, write_without_response)]
-    output_keyboard: [u8; 1],
+    pub(crate) output_keyboard: [u8; 1],
 }
 
 pub struct BleHidServer {
@@ -57,7 +59,7 @@ impl<'s> BleHidServer {
     }
 )]
 #[allow(dead_code)]
-#[derive(defmt::Format)]
+#[derive(defmt::Format, Default)]
 pub struct KeyboardReport {
     pub modifier: u8,
     pub reserved: u8,
