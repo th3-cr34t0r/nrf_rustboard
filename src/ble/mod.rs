@@ -26,8 +26,9 @@ use static_cell::StaticCell;
 use trouble_host::gap::{CentralConfig, GapConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
 use trouble_host::prelude::{
-    AdStructure, Advertisement, AdvertisementParameters, BR_EDR_NOT_SUPPORTED, Central,
-    DefaultPacketPool, LE_GENERAL_DISCOVERABLE, Peripheral, PhyKind, Runner, TxPower, appearance,
+    AdStructure, Advertisement, AdvertisementParameters, AttributeHandle, BR_EDR_NOT_SUPPORTED,
+    Central, DefaultPacketPool, LE_GENERAL_DISCOVERABLE, Peripheral, PhyKind, Runner, TxPower,
+    appearance,
 };
 use trouble_host::{
     Address, BleHostError, Controller, Host, HostResources, PacketPool, Stack, central,
@@ -93,8 +94,8 @@ where
             .support_adv()?
             .support_peripheral()?
             .support_dle_peripheral()?
-            .support_phy_update_peripheral()?
-            .support_le_2m_phy()?
+            // .support_phy_update_peripheral()?
+            // .support_le_2m_phy()?
             .peripheral_count(1)?
             .buffer_cfg(
                 Self::L2CAP_MTU as u16,
@@ -251,29 +252,9 @@ pub async fn run<RNG>(
                 info!("Connected");
 
                 let gatt_events_task = gatt_events_handler(&connection, &server);
+                let send_keystrokes_task = send_keystrokes_task(&connection, &server);
 
-                select(gatt_events_task, async {
-                    loop {
-                        let mut key_report = KeyboardReport::default();
-                        key_report.keycodes[0] = 4;
-
-                        let mut buf = [0; 8];
-
-                        // serialize the key_report
-                        let n = ssmarshal::serialize(&mut buf, &key_report).unwrap();
-
-                        // send keypress
-                        server
-                            .hid_service
-                            .input_keyboard
-                            .notify(&connection, &buf)
-                            .await
-                            .unwrap();
-
-                        Timer::after_millis(1000).await
-                    }
-                })
-                .await;
+                select(gatt_events_task, send_keystrokes_task).await;
             }
             Err(e) => {
                 error!("{}", e);
@@ -306,18 +287,18 @@ async fn advertise<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
-    let advertise_config = AdvertisementParameters {
-        primary_phy: PhyKind::Le2M,
-        secondary_phy: PhyKind::Le2M,
-        tx_power: TxPower::Plus8dBm,
-        interval_min: Duration::from_millis(200),
-        interval_max: Duration::from_millis(200),
-        ..Default::default()
-    };
+    // let advertise_config = AdvertisementParameters {
+    //     primary_phy: PhyKind::Le2M,
+    //     secondary_phy: PhyKind::Le2M,
+    //     tx_power: TxPower::Plus8dBm,
+    //     interval_min: Duration::from_millis(200),
+    //     interval_max: Duration::from_millis(200),
+    //     ..Default::default()
+    // };
 
     let advertiser = peripheral
         .advertise(
-            &advertise_config,
+            &AdvertisementParameters::default(),
             Advertisement::ConnectableScannableUndirected {
                 adv_data: &advertiser_data[..],
                 scan_data: &[],
@@ -325,14 +306,8 @@ async fn advertise<'a, 'b>(
         )
         .await?;
 
-    match with_timeout(Duration::from_millis(300), advertiser.accept()).await {
-        Ok(connection_result) => {
-            let connection = connection_result?.with_attribute_server(server)?;
-            info!("Connection established");
-            Ok(connection)
-        }
-        Err(_) => Err(BleHostError::BleHost(trouble_host::Error::Timeout)),
-    }
+    let connection = advertiser.accept().await?.with_attribute_server(server)?;
+    Ok(connection)
 }
 
 async fn gatt_events_handler<'stack, 'server>(
@@ -347,7 +322,11 @@ async fn gatt_events_handler<'stack, 'server>(
                         let char_handle = event.handle();
                         info!("Characteristic handle read: {}", char_handle);
                     }
-                    GattEvent::Write(event) => {}
+                    GattEvent::Write(event) => {
+                        if event.handle() == server.hid_service.input_keyboard.handle() {
+                            info!("Characteristic handle write: {}", event.handle());
+                        }
+                    }
                     _ => {}
                 };
 
@@ -364,6 +343,34 @@ async fn gatt_events_handler<'stack, 'server>(
     };
 
     error!("Disconnected reason: {}", reason);
+}
+
+async fn send_keystrokes_task<'stack, 'server>(
+    connection: &GattConnection<'stack, 'server, DefaultPacketPool>,
+    server: &'server Server<'_>,
+) {
+    let input_keyboard = server.hid_service.input_keyboard;
+
+    loop {
+        let mut key_report = KeyboardReport::default();
+        key_report.keycodes[0] = 4;
+
+        let mut buf = [0; 8];
+
+        // serialize the key_report
+        let n = ssmarshal::serialize(&mut buf, &key_report).unwrap();
+
+        info!("buf: {}", buf);
+
+        // send keypress
+        if input_keyboard.notify(connection, &buf).await.is_err() {
+            error!("Error notifiyng connection");
+        } else {
+            info!("Notified connection: {}", n);
+        }
+
+        Timer::after_millis(1000).await
+    }
 }
 
 #[embassy_executor::task]
