@@ -21,9 +21,9 @@ async fn main(spawner: Spawner) {
         p.PPI_CH31, p.RNG, p.RTC0, p.TIMER0, p.TEMP,
     );
     let (sdc, mpsl, mut rng) = unwrap!(ble_builder.init());
-    // spawner.must_spawn(run_leds(p.P0_15));
-    // todo:
+
     ble::run(sdc, mpsl, &mut rng, spawner).await;
+    spawner.must_spawn(run_leds(p.P0_15));
     // spawner.must_spawn(scan_matrix_task());
     // spawner.must_spawn(debounce_task());
 }

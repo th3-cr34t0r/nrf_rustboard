@@ -190,11 +190,137 @@ where
 }
 
 const BLE_NAME: &str = "nRFRustboard";
-const CONNS: usize = 2;
-const CHANNELS: usize = 1;
+const CONNECTIONS_MAX: usize = 1;
+const L2CAP_CHANNELS_MAX: usize = 2;
 const ADV_SETS: usize = 1;
 
-type BleHostResources = HostResources<DefaultPacketPool, CONNS, CHANNELS, ADV_SETS>;
+type BleHostResources =
+    HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX, ADV_SETS>;
+
+#[embassy_executor::task]
+async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
+    mpsl.run().await;
+}
+
+#[embassy_executor::task]
+async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
+    runner.run().await.expect("Host task failed to run");
+}
+
+async fn advertise<'a, 'b>(
+    peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
+    server: &'b Server<'_>,
+) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
+    let mut advertiser_data = [0; 31];
+
+    AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::ServiceUuids16(&[
+                ble_server::HUMAN_INTERFACE_DEVICE.to_le_bytes(),
+                ble_server::BATTERY.to_le_bytes(),
+            ]),
+            AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
+            // AdStructure::Unknown {
+            //     ty: 0x19,
+            //     data: &trouble_host::prelude::appearance::human_interface_device::KEYBOARD
+            //         .to_le_bytes(),
+            // },
+        ],
+        &mut advertiser_data[..],
+    )?;
+
+    // let advertise_config = AdvertisementParameters {
+    //     primary_phy: PhyKind::Le2M,
+    //     secondary_phy: PhyKind::Le2M,
+    //     tx_power: TxPower::Plus8dBm,
+    //     interval_min: Duration::from_millis(200),
+    //     interval_max: Duration::from_millis(200),
+    //     ..Default::default()
+    // };
+    //
+
+    let advertiser = peripheral
+        .advertise(
+            &Default::default(),
+            Advertisement::ConnectableScannableUndirected {
+                adv_data: &advertiser_data[..],
+                scan_data: &[],
+            },
+        )
+        .await?;
+
+    info!("[adv] Advertising; waiting for connection...");
+
+    let connection = advertiser.accept().await?.with_attribute_server(server)?;
+
+    info!("[adv] Connection established");
+
+    Ok(connection)
+}
+
+async fn gatt_events_handler<'stack, 'server>(
+    connection: &GattConnection<'stack, 'server, DefaultPacketPool>,
+    server: &'server Server<'_>,
+) {
+    let reason = loop {
+        match connection.next().await {
+            GattConnectionEvent::Gatt { event } => {
+                match &event {
+                    GattEvent::Read(event) => {
+                        let char_handle = event.handle();
+                        info!("Characteristic handle read: {}", char_handle);
+                    }
+                    GattEvent::Write(event) => {
+                        if event.handle() == server.hid_service.input_keyboard.handle() {
+                            info!("Characteristic handle write: {}", event.handle());
+                        }
+                    }
+                    _ => {}
+                };
+
+                match event.accept() {
+                    Ok(reply) => reply.send().await,
+                    Err(e) => {
+                        error!("error sending response {:?}", e)
+                    }
+                };
+            }
+            GattConnectionEvent::Disconnected { reason } => break reason,
+            _ => {}
+        }
+    };
+
+    error!("Disconnected reason: {}", reason);
+}
+
+async fn send_keystrokes_task<'stack, 'server>(
+    connection: &GattConnection<'stack, 'server, DefaultPacketPool>,
+    server: &'server Server<'_>,
+) {
+    let input_keyboard = server.hid_service.input_keyboard;
+
+    loop {
+        let mut key_report = KeyboardReport::default();
+        key_report.keycodes[0] = 4;
+
+        let mut buf = [0; 8];
+
+        // serialize the key_report
+        let n = ssmarshal::serialize(&mut buf, &key_report).unwrap();
+
+        info!("buf: {}", buf);
+
+        // send keypress
+        if input_keyboard.notify(connection, &buf).await.is_err() {
+            error!("Error notifiyng connection");
+        } else {
+            info!("Notified connection: {}", n);
+        }
+
+        Timer::after_millis(1000).await
+    }
+}
 
 /// Run BLE
 pub async fn run<RNG>(
@@ -262,123 +388,4 @@ pub async fn run<RNG>(
             }
         }
     }
-}
-
-async fn advertise<'a, 'b>(
-    peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
-    server: &'b Server<'_>,
-) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
-    let mut advertiser_data = [0; 31];
-
-    AdStructure::encode_slice(
-        &[
-            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[
-                ble_server::HUMAN_INTERFACE_DEVICE.to_le_bytes(),
-                ble_server::BATTERY.to_le_bytes(),
-            ]),
-            AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
-            AdStructure::Unknown {
-                ty: 0x19,
-                data: &trouble_host::prelude::appearance::human_interface_device::KEYBOARD
-                    .to_le_bytes(),
-            },
-        ],
-        &mut advertiser_data[..],
-    )?;
-
-    // let advertise_config = AdvertisementParameters {
-    //     primary_phy: PhyKind::Le2M,
-    //     secondary_phy: PhyKind::Le2M,
-    //     tx_power: TxPower::Plus8dBm,
-    //     interval_min: Duration::from_millis(200),
-    //     interval_max: Duration::from_millis(200),
-    //     ..Default::default()
-    // };
-
-    let advertiser = peripheral
-        .advertise(
-            &AdvertisementParameters::default(),
-            Advertisement::ConnectableScannableUndirected {
-                adv_data: &advertiser_data[..],
-                scan_data: &[],
-            },
-        )
-        .await?;
-
-    let connection = advertiser.accept().await?.with_attribute_server(server)?;
-    Ok(connection)
-}
-
-async fn gatt_events_handler<'stack, 'server>(
-    connection: &GattConnection<'stack, 'server, DefaultPacketPool>,
-    server: &'server Server<'_>,
-) {
-    let reason = loop {
-        match connection.next().await {
-            GattConnectionEvent::Gatt { event } => {
-                match &event {
-                    GattEvent::Read(event) => {
-                        let char_handle = event.handle();
-                        info!("Characteristic handle read: {}", char_handle);
-                    }
-                    GattEvent::Write(event) => {
-                        if event.handle() == server.hid_service.input_keyboard.handle() {
-                            info!("Characteristic handle write: {}", event.handle());
-                        }
-                    }
-                    _ => {}
-                };
-
-                match event.accept() {
-                    Ok(reply) => reply.send().await,
-                    Err(e) => {
-                        error!("error sending response {:?}", e)
-                    }
-                };
-            }
-            GattConnectionEvent::Disconnected { reason } => break reason,
-            _ => {}
-        }
-    };
-
-    error!("Disconnected reason: {}", reason);
-}
-
-async fn send_keystrokes_task<'stack, 'server>(
-    connection: &GattConnection<'stack, 'server, DefaultPacketPool>,
-    server: &'server Server<'_>,
-) {
-    let input_keyboard = server.hid_service.input_keyboard;
-
-    loop {
-        let mut key_report = KeyboardReport::default();
-        key_report.keycodes[0] = 4;
-
-        let mut buf = [0; 8];
-
-        // serialize the key_report
-        let n = ssmarshal::serialize(&mut buf, &key_report).unwrap();
-
-        info!("buf: {}", buf);
-
-        // send keypress
-        if input_keyboard.notify(connection, &buf).await.is_err() {
-            error!("Error notifiyng connection");
-        } else {
-            info!("Notified connection: {}", n);
-        }
-
-        Timer::after_millis(1000).await
-    }
-}
-
-#[embassy_executor::task]
-async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
-    mpsl.run().await;
-}
-
-#[embassy_executor::task]
-async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
-    runner.run().await.expect("Host task failed to run");
 }
