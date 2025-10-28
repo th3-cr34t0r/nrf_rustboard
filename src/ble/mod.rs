@@ -5,20 +5,14 @@ use embassy_futures::select::{self, select};
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::{self, RNG};
 use embassy_nrf::{Peri, bind_interrupts, rng};
-use embassy_time::{Duration, Timer, with_timeout};
-use nrf_mpsl::Peripherals as mpsl_Peripherals;
+use embassy_time::Timer;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
     MPSL_RECOMMENDED_RC_CTIV, MPSL_RECOMMENDED_RC_TEMP_CTIV,
 };
-use nrf_sdc::Error;
-use nrf_sdc::mpsl::MultiprotocolServiceLayer;
-use nrf_sdc::{
-    self as sdc, Mem, Peripherals as sdc_Peripherals, SoftdeviceController,
-    mpsl::{
-        ClockInterruptHandler, HighPrioInterruptHandler, LowPrioInterruptHandler,
-        raw::mpsl_clock_lfclk_cfg_t,
-    },
+use nrf_mpsl::{
+    ClockInterruptHandler, HighPrioInterruptHandler, LowPrioInterruptHandler,
+    Peripherals as mpsl_Peripherals,
 };
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha12Rng;
@@ -26,13 +20,10 @@ use static_cell::StaticCell;
 use trouble_host::gap::{CentralConfig, GapConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
 use trouble_host::prelude::{
-    AdStructure, Advertisement, AdvertisementParameters, AttributeHandle, BR_EDR_NOT_SUPPORTED,
-    Central, DefaultPacketPool, LE_GENERAL_DISCOVERABLE, Peripheral, PhyKind, Runner, TxPower,
-    appearance,
+    AdStructure, Advertisement, AttributeHandle, BR_EDR_NOT_SUPPORTED, DefaultPacketPool,
+    LE_GENERAL_DISCOVERABLE, Peripheral, Runner, appearance,
 };
-use trouble_host::{
-    Address, BleHostError, Controller, Host, HostResources, PacketPool, Stack, central,
-};
+use trouble_host::{Address, BleHostError, Host, HostResources, Stack};
 
 use ssmarshal;
 
