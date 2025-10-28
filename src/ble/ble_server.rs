@@ -1,5 +1,8 @@
 use serde::Serialize;
-use trouble_host::prelude::{characteristic::BATTERY_LEVEL, *};
+use trouble_host::prelude::{
+    characteristic::{BATTERY_LEVEL, BATTERY_LEVEL_STATUS},
+    *,
+};
 use usbd_hid::descriptor::{SerializedDescriptor, gen_hid_descriptor, generator_prelude::*};
 
 pub const HUMAN_INTERFACE_DEVICE: BluetoothUuid16 = BluetoothUuid16::new(0x1812);
@@ -13,8 +16,12 @@ pub struct Server {
 
 #[gatt_service(uuid = service::BATTERY)]
 pub struct BatteryService {
-    #[characteristic(uuid = BATTERY_LEVEL, read, notify)]
-    battery_leves: u8,
+    #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
+    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
+    #[characteristic(uuid = BATTERY_LEVEL, read, notify, value = 10)]
+    pub(crate) level: u8,
+    #[characteristic(uuid = BATTERY_LEVEL_STATUS, write, read, notify)]
+    status: bool,
 }
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub struct HidService {

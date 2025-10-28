@@ -7,7 +7,14 @@ use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::{Peri, gpio::Output, peripherals};
 use embassy_time::Timer;
+use nrf_mpsl::Flash;
+use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use {defmt_rtt as _, panic_probe as _};
+
+#[embassy_executor::task]
+async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
+    mpsl.run().await;
+}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -22,7 +29,13 @@ async fn main(spawner: Spawner) {
     );
     let (sdc, mpsl, mut rng) = unwrap!(ble_builder.init());
 
-    ble::run(sdc, mpsl, &mut rng, spawner).await;
+    // run the mpsl task
+    spawner.must_spawn(mpsl_task(mpsl));
+
+    // Use internal Flash as storage
+    let mut flash = Flash::take(mpsl, p.NVMC);
+
+    ble::run(sdc, &mut rng, flash, spawner).await;
     spawner.must_spawn(run_leds(p.P0_15));
     // spawner.must_spawn(scan_matrix_task());
     // spawner.must_spawn(debounce_task());
