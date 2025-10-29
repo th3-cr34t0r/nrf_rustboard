@@ -4,7 +4,7 @@ use embassy_executor::Spawner;
 use embassy_futures::select::{self, select};
 use embassy_nrf::mode::Async;
 use embassy_nrf::peripherals::{self, RNG};
-use embassy_nrf::{Peri, bind_interrupts, qspi, rng};
+use embassy_nrf::{Peri, Peripherals, bind_interrupts, qspi, rng};
 use embassy_time::Timer;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
@@ -61,138 +61,109 @@ pub struct BleControllerBuilder<'a> {
     timer0: Peri<'a, peripherals::TIMER0>,
     temp: Peri<'a, peripherals::TEMP>,
 }
-impl<'a> BleControllerBuilder<'a>
-where
-    'a: 'static,
-{
-    const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
-        source: MPSL_CLOCK_LF_SRC_RC as u8,
-        rc_ctiv: MPSL_RECOMMENDED_RC_CTIV as u8,
-        rc_temp_ctiv: MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
-        accuracy_ppm: MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
-        skip_wait_lfclk_started: MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
+
+const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
+    source: MPSL_CLOCK_LF_SRC_RC as u8,
+    rc_ctiv: MPSL_RECOMMENDED_RC_CTIV as u8,
+    rc_temp_ctiv: MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
+    accuracy_ppm: MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
+    skip_wait_lfclk_started: MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
+};
+
+/// How many outgoing L2CAP buffers per link
+const L2CAP_TXQ: u8 = 3;
+
+/// How many incoming L2CAP buffers per link
+const L2CAP_RXQ: u8 = 3;
+
+/// Size of L2CAP packets
+const L2CAP_MTU: usize = 251;
+
+/// Build SoftDevice
+fn build_sdc<'d, const N: usize>(
+    p: nrf_sdc::Peripherals<'d>,
+    rng: &'d mut rng::Rng<Async>,
+    mpsl: &'d MultiprotocolServiceLayer,
+    mem: &'d mut sdc::Mem<N>,
+) -> Result<SoftdeviceController<'d>, nrf_sdc::Error> {
+    sdc::Builder::new()?
+        .support_adv()?
+        .support_peripheral()?
+        .peripheral_count(1)?
+        .buffer_cfg(
+            Self::L2CAP_MTU as u16,
+            Self::L2CAP_MTU as u16,
+            Self::L2CAP_TXQ,
+            Self::L2CAP_RXQ,
+        )?
+        .build(p, rng, mpsl, mem)
+}
+
+pub fn init() -> Result<
+    (
+        Peripherals<'a>,
+        SoftdeviceController<'a>,
+        ChaCha12Rng,
+        Flash<'a>,
+    ),
+    nrf_sdc::Error,
+> {
+    // peripherals init
+    let p = {
+        static PERIPHERALS: StaticCell<Peripherals> = StaticCell::new();
+
+        PERIPHERALS.init(embassy_nrf::init(Default::default()))
     };
 
-    /// How many outgoing L2CAP buffers per link
-    const L2CAP_TXQ: u8 = 3;
+    let sdc_p = sdc_Peripherals::new(
+        p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,
+        p.PPI_CH25, p.PPI_CH26, p.PPI_CH27, p.PPI_CH28, p.PPI_CH29,
+    );
 
-    /// How many incoming L2CAP buffers per link
-    const L2CAP_RXQ: u8 = 3;
+    let sdc_mem = sdc::Mem::<SDC_MEMORY_SIZE>::new();
 
-    /// Size of L2CAP packets
-    const L2CAP_MTU: usize = 251;
-
-    /// Build SoftDevice
-    fn build_sdc<'d, const N: usize>(
-        p: nrf_sdc::Peripherals<'d>,
-        rng: &'d mut rng::Rng<Async>,
-        mpsl: &'d MultiprotocolServiceLayer,
-        mem: &'d mut sdc::Mem<N>,
-    ) -> Result<SoftdeviceController<'d>, nrf_sdc::Error> {
-        sdc::Builder::new()?
-            .support_adv()?
-            .support_peripheral()?
-            .peripheral_count(1)?
-            .buffer_cfg(
-                Self::L2CAP_MTU as u16,
-                Self::L2CAP_MTU as u16,
-                Self::L2CAP_TXQ,
-                Self::L2CAP_RXQ,
-            )?
-            .build(p, rng, mpsl, mem)
-    }
-
-    pub(crate) fn new(
-        ppi_ch17: Peri<'a, peripherals::PPI_CH17>,
-        ppi_ch18: Peri<'a, peripherals::PPI_CH18>,
-        ppi_ch19: Peri<'a, peripherals::PPI_CH19>,
-        ppi_ch20: Peri<'a, peripherals::PPI_CH20>,
-        ppi_ch21: Peri<'a, peripherals::PPI_CH21>,
-        ppi_ch22: Peri<'a, peripherals::PPI_CH22>,
-        ppi_ch23: Peri<'a, peripherals::PPI_CH23>,
-        ppi_ch24: Peri<'a, peripherals::PPI_CH24>,
-        ppi_ch25: Peri<'a, peripherals::PPI_CH25>,
-        ppi_ch26: Peri<'a, peripherals::PPI_CH26>,
-        ppi_ch27: Peri<'a, peripherals::PPI_CH27>,
-        ppi_ch28: Peri<'a, peripherals::PPI_CH28>,
-        ppi_ch29: Peri<'a, peripherals::PPI_CH29>,
-        ppi_ch30: Peri<'a, peripherals::PPI_CH30>,
-        ppi_ch31: Peri<'a, peripherals::PPI_CH31>,
-        rng_p: Peri<'a, peripherals::RNG>,
-        rtc0: Peri<'a, peripherals::RTC0>,
-        timer0: Peri<'a, peripherals::TIMER0>,
-        temp: Peri<'a, peripherals::TEMP>,
-    ) -> Self {
-        let sdc_p = sdc_Peripherals::new(
-            ppi_ch17, ppi_ch18, ppi_ch20, ppi_ch21, ppi_ch22, ppi_ch23, ppi_ch24, ppi_ch25,
-            ppi_ch26, ppi_ch27, ppi_ch28, ppi_ch29,
-        );
-
-        let sdc_mem = sdc::Mem::<SDC_MEMORY_SIZE>::new();
-
-        Self {
-            sdc_p,
-            sdc_mem,
-            ppi_ch19,
-            ppi_ch30,
-            ppi_ch31,
-            rng_p,
-            rtc0,
-            timer0,
-            temp,
-        }
-    }
-
-    pub(crate) fn init(
-        self,
-    ) -> Result<
-        (
-            SoftdeviceController<'a>,
-            &'static MultiprotocolServiceLayer<'a>,
-            ChaCha12Rng,
-        ),
-        nrf_sdc::Error,
-    > {
+    let mpsl = {
+        let mpsl_peri =
+            mpsl_Peripherals::new(p.rtc0, p.timer0, p.temp, p.ppi_ch19, p.ppi_ch30, p.ppi_ch31);
         static SESSION_MEM: StaticCell<SessionMem<1>> = StaticCell::new();
 
-        let mpsl = {
-            let p = mpsl_Peripherals::new(
-                self.rtc0,
-                self.timer0,
-                self.temp,
-                self.ppi_ch19,
-                self.ppi_ch30,
-                self.ppi_ch31,
-            );
+        MultiprotocolServiceLayer::with_timeslots(
+            mpsl_peri,
+            Irqs,
+            Self::LFCLK_CFG,
+            SESSION_MEM.init(SessionMem::new()),
+        )
+    }?;
 
-            MultiprotocolServiceLayer::with_timeslots(
-                p,
-                Irqs,
-                Self::LFCLK_CFG,
-                SESSION_MEM.init(SessionMem::new()),
-            )
-        }?;
+    // Use internal Flash as storage
+    let mut flash = {
+        static FLASH: StaticCell<Flash<'static>> = StaticCell::new();
+        FLASH.init(Flash::take(mpsl, p.NVMC))
+    };
 
-        let mut sdc_rng = {
-            static SDC_RNG: StaticCell<rng::Rng<'static, Async>> = StaticCell::new();
-            SDC_RNG.init(rng::Rng::new(self.rng_p, Irqs))
-        };
+    let mut sdc_rng = {
+        static SDC_RNG: StaticCell<rng::Rng<'static, Async>> = StaticCell::new();
+        SDC_RNG.init(rng::Rng::new(self.rng_p, Irqs))
+    };
 
-        let sdc_mem = {
-            static SDC_MEM: StaticCell<sdc::Mem<SDC_MEMORY_SIZE>> = StaticCell::new();
-            SDC_MEM.init(self.sdc_mem)
-        };
+    let sdc_mem = {
+        static SDC_MEM: StaticCell<sdc::Mem<SDC_MEMORY_SIZE>> = StaticCell::new();
+        SDC_MEM.init(self.sdc_mem)
+    };
 
-        let mpsl = {
-            static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
-            MPSL.init(mpsl)
-        };
+    let mpsl = {
+        static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
+        MPSL.init(mpsl)
+    };
 
-        let rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
-        let sdc = Self::build_sdc(self.sdc_p, sdc_rng, mpsl, sdc_mem)?;
+    let rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
 
-        Ok((sdc, mpsl, rng))
-    }
+    let sdc = Self::build_sdc(self.sdc_p, sdc_rng, mpsl, sdc_mem)?;
+
+    // run the mpsl task
+    spawner.must_spawn(mpsl_task(mpsl));
+
+    Ok((p, sdc, rng, flash))
 }
 
 const BLE_NAME: &str = "nRFRustboard";
@@ -201,6 +172,11 @@ const L2CAP_CHANNELS_MAX: usize = 2;
 const ADV_SETS: usize = 1;
 
 type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
+
+#[embassy_executor::task]
+async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
+    mpsl.run().await;
+}
 
 #[embassy_executor::task]
 async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
