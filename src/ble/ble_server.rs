@@ -26,7 +26,7 @@ pub struct BatteryService {
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
 pub struct HidService {
     #[characteristic(uuid = "2a4b", read, value = KeyboardReport::desc().try_into().expect("Failed to convert keyboard report to [u8; 67]"))]
-    pub(crate) report_map: [u8; 67],
+    pub(crate) report: [u8; 67],
     #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
     #[characteristic(uuid = "2a22", read, notify)]
     pub(crate) input_keyboard: [u8; 8],

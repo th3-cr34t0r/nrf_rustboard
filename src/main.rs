@@ -2,13 +2,12 @@
 #![no_main]
 mod ble;
 
-use ble::BleControllerBuilder;
+use crate::ble::ble_init;
 use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_nrf::{Peri, gpio::Output, peripherals};
 use embassy_time::Timer;
-use nrf_mpsl::Flash;
-use nrf_sdc::mpsl::MultiprotocolServiceLayer;
+
 use {defmt_rtt as _, panic_probe as _};
 
 #[embassy_executor::task]
@@ -28,11 +27,20 @@ pub async fn run_leds(led_pin: Peri<'static, peripherals::P0_15>) -> ! {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let (p, sdc, mut rng, flash) = unwrap!(ble_builder.init());
+    // init peripherals
+    let p = embassy_nrf::init(Default::default());
 
-    ble::run(sdc, &mut rng, flash, spawner).await;
+    // init ble
+    let (sdc, mpsl, storage, mut rng) = unwrap!(ble_init(
+        p.PPI_CH17, p.PPI_CH18, p.PPI_CH19, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23,
+        p.PPI_CH24, p.PPI_CH25, p.PPI_CH26, p.PPI_CH27, p.PPI_CH28, p.PPI_CH29, p.PPI_CH30,
+        p.PPI_CH31, p.RTC0, p.TIMER0, p.TEMP, p.NVMC, p.RNG
+    ));
 
-    spawner.must_spawn(run_leds(p.P0_15));
+    // run ble
+    ble::run(sdc, &mpsl, storage, &mut rng, spawner).await;
+
+    // spawner.must_spawn(run_leds(p.P0_15));
     // spawner.must_spawn(scan_matrix_task());
     // spawner.must_spawn(debounce_task());
 }
