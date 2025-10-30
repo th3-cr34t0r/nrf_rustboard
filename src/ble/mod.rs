@@ -1,4 +1,3 @@
-use ble_server::KeyboardReport;
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::select::{self, select};
@@ -8,7 +7,7 @@ use embassy_nrf::peripherals::{
     self, NVMC, PPI_CH17, PPI_CH18, PPI_CH19, PPI_CH20, PPI_CH21, PPI_CH22, PPI_CH23, PPI_CH24,
     PPI_CH25, PPI_CH26, PPI_CH27, PPI_CH28, PPI_CH29, PPI_CH30, PPI_CH31, RNG, RTC0, TEMP, TIMER0,
 };
-use embassy_nrf::{Peri, Peripherals, bind_interrupts, qspi, rng};
+use embassy_nrf::{Peri, Peripherals, bind_interrupts, buffered_uarte, qspi, rng};
 use embassy_time::Timer;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
@@ -35,9 +34,10 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, HostResources, IoCapabilities, Stack};
 
-use ssmarshal;
+use ssmarshal::{self, serialize};
+use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor};
 
-use crate::ble::ble_server::{BleHidServer, Server};
+use crate::ble::ble_server::Server;
 mod ble_server;
 
 bind_interrupts!(struct Irqs {
@@ -52,7 +52,7 @@ bind_interrupts!(struct Irqs {
 
 const BLE_NAME: &str = "nRFRustboard";
 const CONNECTIONS_MAX: usize = 1;
-const L2CAP_CHANNELS_MAX: usize = 2;
+const L2CAP_CHANNELS_MAX: usize = 4;
 const ADV_SETS: usize = 1;
 
 type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
@@ -75,7 +75,7 @@ const L2CAP_TXQ: u8 = 3;
 const L2CAP_RXQ: u8 = 3;
 
 /// Size of L2CAP packets
-const L2CAP_MTU: usize = 251;
+const L2CAP_MTU: usize = 72;
 
 /// Build SoftDevice
 fn build_sdc<'a, const N: usize>(
@@ -197,7 +197,8 @@ pub async fn run<RNG>(
         STACK.init(
             trouble_host::new(sdc, resources)
                 .set_random_address(address)
-                .set_random_generator_seed(rng), // .set_io_capabilities(IoCapabilities::NoInputNoOutput), //suitable for a keyboard
+                .set_random_generator_seed(rng)
+                .set_io_capabilities(IoCapabilities::NoInputNoOutput), //suitable for a keyboard
         )
     };
 
@@ -208,6 +209,8 @@ pub async fn run<RNG>(
     } = stack.build();
 
     // let mut bond_stored = if let Some (bond_info) = load_bond
+    let report_map = KeyboardReport::desc();
+    info!("[report_map] length: {}", report_map.len());
 
     // create the peripheral server
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
@@ -254,8 +257,8 @@ async fn advertise<'a, 'b>(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             AdStructure::ServiceUuids16(&[
+                ble_server::BATTERY.to_le_bytes(),
                 ble_server::HUMAN_INTERFACE_DEVICE.to_le_bytes(),
-                // ble_server::BATTERY.to_le_bytes(),
             ]),
             AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
             AdStructure::Unknown {
@@ -290,7 +293,7 @@ async fn gatt_events_handler<'stack, 'server>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
 ) {
-    let hid_service = server.hid_service.report;
+    let hid_service = server.hid_service.report_map;
     let battery_service = server.battery_service.level;
 
     let reason = loop {
@@ -351,13 +354,17 @@ async fn custom_task<'stack, 'server>(
     server: &'server Server<'_>,
 ) {
     let battery_characteristic = server.battery_service.level;
-    let hid_characteristic = server.hid_service.report;
 
     let mut tick: u8 = 0;
+    let empty_buff = [0u8; 8];
+    let mut buff = [0u8; 8];
+    let mut sent = false;
 
-    let mut report: [u8; 67] = [0; 67];
+    let mut keyboard_report = KeyboardReport::default();
 
-    report[0] = 4;
+    keyboard_report.keycodes[0] = KeyboardUsage::KeyboardAa as u8;
+
+    let n = serialize(&mut buff, &keyboard_report).unwrap();
 
     loop {
         tick = tick.wrapping_add(1);
@@ -365,10 +372,31 @@ async fn custom_task<'stack, 'server>(
             break;
         }
 
-        // if hid_characteristic.notify(conn, &report).await.is_err() {
-        //     break;
-        // }
+        if !sent {
+            match server.hid_service.input_keyboard.notify(conn, &buff).await {
+                Ok(_) => info!("[notify] notified successfully: {}", buff),
+                Err(e) => {
+                    info!("[notify] ERROR: {}", e);
+                    break;
+                }
+            }
 
+            sent = !sent;
+        } else {
+            match server
+                .hid_service
+                .input_keyboard
+                .notify(conn, &empty_buff)
+                .await
+            {
+                Ok(_) => info!("[notify] notified successfully: {}", empty_buff),
+                Err(e) => {
+                    info!("[notify] ERROR: {}", e);
+                    break;
+                }
+            }
+            sent = !sent;
+        }
         Timer::after_millis(2000).await;
     }
 }

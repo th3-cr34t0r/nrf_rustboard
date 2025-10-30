@@ -3,19 +3,19 @@ use trouble_host::prelude::{
     characteristic::{BATTERY_LEVEL, BATTERY_LEVEL_STATUS},
     *,
 };
-use usbd_hid::descriptor::{SerializedDescriptor, gen_hid_descriptor, generator_prelude::*};
+use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 pub const HUMAN_INTERFACE_DEVICE: BluetoothUuid16 = BluetoothUuid16::new(0x1812);
 pub const BATTERY: BluetoothUuid16 = BluetoothUuid16::new(0x180f);
 
 #[gatt_server]
-pub struct Server {
-    pub battery_service: BatteryService,
-    pub hid_service: HidService,
+pub(crate) struct Server {
+    pub(crate) battery_service: BatteryService,
+    pub(crate) hid_service: HidService,
 }
 
 #[gatt_service(uuid = service::BATTERY)]
-pub struct BatteryService {
+pub(crate) struct BatteryService {
     #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
     #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
     #[characteristic(uuid = BATTERY_LEVEL, read, notify, value = 10)]
@@ -24,14 +24,20 @@ pub struct BatteryService {
     status: bool,
 }
 #[gatt_service(uuid = service::HUMAN_INTERFACE_DEVICE)]
-pub struct HidService {
-    #[characteristic(uuid = "2a4b", read, value = KeyboardReport::desc().try_into().expect("Failed to convert keyboard report to [u8; 67]"))]
-    pub(crate) report: [u8; 67],
+pub(crate) struct HidService {
+    #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
+    pub(crate) hid_info: [u8; 4],
+    #[characteristic(uuid = "2a4b", read, value = KeyboardReport::desc().try_into().expect("Failed to convert KeyboardReport to [u8; 67]"))]
+    pub(crate) report_map: [u8; 69],
+    #[characteristic(uuid = "2a4c", write_without_response)]
+    pub(crate) hid_control_point: u8,
+    #[characteristic(uuid = "2a4e", read, write_without_response, value = 1)]
+    pub(crate) protocol_mode: u8,
     #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
-    #[characteristic(uuid = "2a22", read, notify)]
+    #[characteristic(uuid = "2a4d", read, notify)]
     pub(crate) input_keyboard: [u8; 8],
     #[descriptor(uuid = "2908", read, value = [0u8, 2u8])]
-    #[characteristic(uuid = "2a32", read, write, write_without_response)]
+    #[characteristic(uuid = "2a4d", read, write, write_without_response)]
     pub(crate) output_keyboard: [u8; 1],
 }
 
@@ -45,31 +51,4 @@ impl<'s> BleHidServer {
             input_keyboard: server.hid_service.input_keyboard,
         }
     }
-}
-/// KeyboardReport describes a report and its companion descriptor that can be
-/// used to send keyboard button presses to a host and receive the status of the
-/// keyboard LEDs.
-#[gen_hid_descriptor(
-    (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = KEYBOARD) = {
-        (usage_page = KEYBOARD, usage_min = 0xE0, usage_max = 0xE7) = {
-            #[packed_bits 8] #[item_settings data,variable,absolute] modifier=input;
-        };
-        (logical_min = 0x00,) = {
-            #[item_settings constant,variable,absolute] reserved=input;
-        };
-        (usage_page = LEDS, usage_min = 0x01, usage_max = 0x05) = {
-            #[packed_bits 5] #[item_settings data,variable,absolute] leds=output;
-        };
-        (usage_page = KEYBOARD, usage_min = 0x00, usage_max = 0xDD) = {
-            #[item_settings data,array,absolute] keycodes=input;
-        };
-    }
-)]
-#[allow(dead_code)]
-#[derive(defmt::Format, Default)]
-pub struct KeyboardReport {
-    pub modifier: u8,
-    pub reserved: u8,
-    pub leds: u8,
-    pub keycodes: [u8; 6],
 }
