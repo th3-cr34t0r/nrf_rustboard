@@ -27,7 +27,7 @@ pub(crate) struct BatteryService {
 pub(crate) struct HidService {
     #[characteristic(uuid = "2a4a", read, value = [0x01, 0x01, 0x00, 0x03])]
     pub(crate) hid_info: [u8; 4],
-    #[characteristic(uuid = "2a4b", read, value = KeyboardReport::desc().try_into().expect("Failed to convert KeyboardReport to [u8; 67]"))]
+    #[characteristic(uuid = "2a4b", read, value = KeyboardReport::desc().try_into().expect("Failed to convert KeyboardReport to [u8; 69]"))]
     pub(crate) report_map: [u8; 69],
     #[characteristic(uuid = "2a4c", write_without_response)]
     pub(crate) hid_control_point: u8,

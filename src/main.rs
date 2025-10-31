@@ -3,8 +3,12 @@
 mod ble;
 
 use crate::ble::ble_init;
+
+use self::*;
+
 use defmt::{info, unwrap};
 use embassy_executor::Spawner;
+use embassy_futures::select::{select_slice, select3};
 use embassy_nrf::{Peri, gpio::Output, peripherals};
 use embassy_time::Timer;
 
@@ -40,7 +44,5 @@ async fn main(spawner: Spawner) {
     // run ble
     ble::run(sdc, &mpsl, storage, &mut rng, spawner).await;
 
-    // spawner.must_spawn(run_leds(p.P0_15));
-    // spawner.must_spawn(scan_matrix_task());
-    // spawner.must_spawn(debounce_task());
+    select3(scan_matrix(), debounce(), key_provision());
 }
