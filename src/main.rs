@@ -1,14 +1,19 @@
 #![no_std]
 #![no_main]
+
 mod ble;
+mod debounce;
+mod key_provision;
+mod matrix;
 
-use crate::ble::ble_init;
-
-use self::*;
+use ble::ble_init;
+use debounce::debounce::debounce;
+use key_provision::key_provision::key_provision;
+use matrix::scan_matrix::scan_matrix;
 
 use defmt::{info, unwrap};
 use embassy_executor::Spawner;
-use embassy_futures::select::{select_slice, select3};
+use embassy_futures::select::select3;
 use embassy_nrf::{Peri, gpio::Output, peripherals};
 use embassy_time::Timer;
 
@@ -44,5 +49,5 @@ async fn main(spawner: Spawner) {
     // run ble
     ble::run(sdc, &mpsl, storage, &mut rng, spawner).await;
 
-    select3(scan_matrix(), debounce(), key_provision());
+    let _ = select3(scan_matrix(), debounce(), key_provision()).await;
 }
