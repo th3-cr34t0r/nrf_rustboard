@@ -1,12 +1,8 @@
-use serde::Serialize;
 use trouble_host::prelude::{
     characteristic::{BATTERY_LEVEL, BATTERY_LEVEL_STATUS},
     *,
 };
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
-
-pub const HUMAN_INTERFACE_DEVICE: BluetoothUuid16 = BluetoothUuid16::new(0x1812);
-pub const BATTERY: BluetoothUuid16 = BluetoothUuid16::new(0x180f);
 
 #[gatt_server]
 pub(crate) struct Server {

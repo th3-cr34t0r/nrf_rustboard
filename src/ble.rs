@@ -1,13 +1,10 @@
 use defmt::{error, info};
 use embassy_executor::Spawner;
-use embassy_futures::select::{self, select};
+use embassy_futures::select::select;
 use embassy_nrf::mode::Async;
 
-use embassy_nrf::peripherals::{
-    self, NVMC, PPI_CH17, PPI_CH18, PPI_CH19, PPI_CH20, PPI_CH21, PPI_CH22, PPI_CH23, PPI_CH24,
-    PPI_CH25, PPI_CH26, PPI_CH27, PPI_CH28, PPI_CH29, PPI_CH30, PPI_CH31, RNG, RTC0, TEMP, TIMER0,
-};
-use embassy_nrf::{Peri, Peripherals, bind_interrupts, buffered_uarte, qspi, rng};
+use embassy_nrf::peripherals::RNG;
+use embassy_nrf::{bind_interrupts, qspi, rng};
 use embassy_time::Timer;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
@@ -17,7 +14,7 @@ use nrf_mpsl::{Flash, Peripherals as mpsl_Peripherals};
 use nrf_sdc::Error;
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use nrf_sdc::{
-    self as sdc, Mem, Peripherals as sdc_Peripherals, SoftdeviceController,
+    self as sdc, Peripherals as sdc_Peripherals, SoftdeviceController,
     mpsl::{
         ClockInterruptHandler, HighPrioInterruptHandler, LowPrioInterruptHandler, SessionMem,
         raw::mpsl_clock_lfclk_cfg_t,
@@ -28,17 +25,19 @@ use rand_chacha::ChaCha12Rng;
 use static_cell::StaticCell;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
+use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
-    AdStructure, Advertisement, AdvertisementParameters, AttributeHandle, BR_EDR_NOT_SUPPORTED,
-    DefaultPacketPool, LE_GENERAL_DISCOVERABLE, Peripheral, Runner, appearance,
+    AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
+    Peripheral, Runner, appearance,
 };
 use trouble_host::{Address, BleHostError, Host, HostResources, IoCapabilities, Stack};
 
 use ssmarshal::{self, serialize};
 use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor};
 
-use crate::ble::ble_server::Server;
-mod ble_server;
+use crate::ble::services::Server;
+use crate::peripherals::BlePeri;
+mod services;
 
 bind_interrupts!(struct Irqs {
     RNG => rng::InterruptHandler<RNG>;
@@ -103,26 +102,7 @@ async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, De
 }
 
 pub fn ble_init(
-    ppi_ch17: Peri<'static, PPI_CH17>,
-    ppi_ch18: Peri<'static, PPI_CH18>,
-    ppi_ch19: Peri<'static, PPI_CH19>,
-    ppi_ch20: Peri<'static, PPI_CH20>,
-    ppi_ch21: Peri<'static, PPI_CH21>,
-    ppi_ch22: Peri<'static, PPI_CH22>,
-    ppi_ch23: Peri<'static, PPI_CH23>,
-    ppi_ch24: Peri<'static, PPI_CH24>,
-    ppi_ch25: Peri<'static, PPI_CH25>,
-    ppi_ch26: Peri<'static, PPI_CH26>,
-    ppi_ch27: Peri<'static, PPI_CH27>,
-    ppi_ch28: Peri<'static, PPI_CH28>,
-    ppi_ch29: Peri<'static, PPI_CH29>,
-    ppi_ch30: Peri<'static, PPI_CH30>,
-    ppi_ch31: Peri<'static, PPI_CH31>,
-    rtc0: Peri<'static, RTC0>,
-    timer0: Peri<'static, TIMER0>,
-    temp: Peri<'static, TEMP>,
-    nvmc: Peri<'static, NVMC>,
-    rng: Peri<'static, RNG>,
+    ble_peri: BlePeri,
 ) -> Result<
     (
         SoftdeviceController<'static>,
@@ -133,14 +113,31 @@ pub fn ble_init(
     nrf_sdc::Error,
 > {
     let sdc_p = sdc_Peripherals::new(
-        ppi_ch17, ppi_ch18, ppi_ch20, ppi_ch21, ppi_ch22, ppi_ch23, ppi_ch24, ppi_ch25, ppi_ch26,
-        ppi_ch27, ppi_ch28, ppi_ch29,
+        ble_peri.ppi_ch17,
+        ble_peri.ppi_ch18,
+        ble_peri.ppi_ch20,
+        ble_peri.ppi_ch21,
+        ble_peri.ppi_ch22,
+        ble_peri.ppi_ch23,
+        ble_peri.ppi_ch24,
+        ble_peri.ppi_ch25,
+        ble_peri.ppi_ch26,
+        ble_peri.ppi_ch27,
+        ble_peri.ppi_ch28,
+        ble_peri.ppi_ch29,
     );
 
     let sdc_mem = sdc::Mem::<SDC_MEMORY_SIZE>::new();
 
     let mpsl = {
-        let mpsl_peri = mpsl_Peripherals::new(rtc0, timer0, temp, ppi_ch19, ppi_ch30, ppi_ch31);
+        let mpsl_peri = mpsl_Peripherals::new(
+            ble_peri.rtc0,
+            ble_peri.timer0,
+            ble_peri.temp,
+            ble_peri.ppi_ch19,
+            ble_peri.ppi_ch30,
+            ble_peri.ppi_ch31,
+        );
         static SESSION_MEM: StaticCell<SessionMem<1>> = StaticCell::new();
 
         static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
@@ -153,11 +150,11 @@ pub fn ble_init(
     };
 
     // Use internal Flash as storage
-    let storage = Flash::take(mpsl, nvmc);
+    let storage = Flash::take(mpsl, ble_peri.nvmc);
 
     let mut sdc_rng = {
         static SDC_RNG: StaticCell<rng::Rng<'static, Async>> = StaticCell::new();
-        SDC_RNG.init(rng::Rng::new(rng, Irqs))
+        SDC_RNG.init(rng::Rng::new(ble_peri.rng, Irqs))
     };
 
     let sdc_mem = {
@@ -173,7 +170,7 @@ pub fn ble_init(
 }
 
 /// Run BLE
-pub async fn run<RNG>(
+pub async fn ble_run<RNG>(
     sdc: SoftdeviceController<'static>,
     mpsl: &'static MultiprotocolServiceLayer<'static>,
     storage: Flash<'static>,
@@ -257,8 +254,8 @@ async fn advertise<'a, 'b>(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             AdStructure::ServiceUuids16(&[
-                ble_server::BATTERY.to_le_bytes(),
-                ble_server::HUMAN_INTERFACE_DEVICE.to_le_bytes(),
+                BATTERY.to_le_bytes(),
+                HUMAN_INTERFACE_DEVICE.to_le_bytes(),
             ]),
             AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
             AdStructure::Unknown {
@@ -364,7 +361,7 @@ async fn custom_task<'stack, 'server>(
 
     keyboard_report.keycodes[0] = KeyboardUsage::KeyboardAa as u8;
 
-    let n = serialize(&mut buff, &keyboard_report).unwrap();
+    let _n = serialize(&mut buff, &keyboard_report).unwrap();
 
     loop {
         tick = tick.wrapping_add(1);
