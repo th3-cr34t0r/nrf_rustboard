@@ -8,10 +8,7 @@ use embassy_nrf::{
     },
 };
 
-use crate::{
-    config::{COLS, ROWS},
-    matrix::Matrix,
-};
+use crate::matrix::Matrix;
 
 pub struct BlePeri {
     pub ppi_ch17: Peri<'static, PPI_CH17>,
@@ -38,15 +35,13 @@ pub struct BlePeri {
 
 pub struct AppPeri<'a> {
     pub ble_peri: BlePeri,
-    pub matrix_peri: Matrix,
+    pub matrix_peri: Matrix<'a>,
 }
 
 impl<'a> AppPeri<'a> {
     pub fn new() -> Self {
         // init peripherals
         let p = embassy_nrf::init(Default::default());
-
-        let matrix_peir = Matrix::init();
 
         // init ble peripherals
         let ble_peri = BlePeri {
@@ -71,6 +66,26 @@ impl<'a> AppPeri<'a> {
             nvmc: p.NVMC,
             rng: p.RNG,
         };
+
+        // init rows
+        let rows = [
+            Output::new(p.P0_17, Level::Low, OutputDrive::Standard),
+            Output::new(p.P0_20, Level::Low, OutputDrive::Standard),
+            Output::new(p.P0_22, Level::Low, OutputDrive::Standard),
+            Output::new(p.P0_24, Level::Low, OutputDrive::Standard),
+        ];
+
+        // init cols
+        let cols = [
+            Input::new(p.P0_31, Pull::Up),
+            Input::new(p.P0_29, Pull::Up),
+            Input::new(p.P0_02, Pull::Up),
+            Input::new(p.P1_15, Pull::Up),
+            Input::new(p.P1_13, Pull::Up),
+        ];
+
+        // init matrix
+        let matrix_peri = Matrix::init(rows, cols);
 
         Self {
             ble_peri,

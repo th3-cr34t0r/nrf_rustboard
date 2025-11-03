@@ -1,4 +1,5 @@
-// lib
+#![no_std]
+#![no_main]
 
 use embassy_time::{Duration, Timer};
 
