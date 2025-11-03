@@ -1061,6 +1061,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embedded-storage-async",
+ "heapless 0.9.1",
  "nrf-mpsl",
  "nrf-sdc",
  "panic-probe",

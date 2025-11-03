@@ -33,7 +33,7 @@ async fn main(spawner: Spawner) {
     // run tasks
     let _ = join4(
         ble_run(sdc, &mpsl, storage, &mut rng, spawner),
-        scan_matrix(p.rows, p.cols),
+        scan_matrix(p.matrix_peri),
         debounce(),
         key_provision(),
     )
