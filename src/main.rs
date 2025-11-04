@@ -1,24 +1,17 @@
 #![no_std]
 #![no_main]
 
-mod ble;
-mod config;
-mod debounce;
-mod key_provision;
-mod matrix;
-mod peripherals;
-
-use ble::ble_init;
-use debounce::debounce;
-use key_provision::key_provision;
-use matrix::scan_matrix;
+use nrf_rustboard::ble::ble_init;
+use nrf_rustboard::debounce::debounce;
+use nrf_rustboard::key_provision::key_provision;
+use nrf_rustboard::matrix::scan_matrix;
 
 use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_futures::join::join4;
 
-use crate::ble::ble_run;
-use peripherals::AppPeri;
+use nrf_rustboard::ble::ble_run;
+use nrf_rustboard::peripherals::AppPeri;
 
 use {defmt_rtt as _, panic_probe as _};
 
