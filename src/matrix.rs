@@ -5,9 +5,11 @@ use crate::{KEY_REPORT, delay_ms, delay_us};
 use core::pin::pin;
 use embassy_futures::select::{Either, select, select_slice};
 use embassy_nrf::gpio::{Input, Output};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Sender;
 use embassy_time::Instant;
 use heapless::Vec;
-use usbd_hid::descriptor::KeyboardUsage;
+use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct KeyPos {
@@ -84,16 +86,18 @@ impl<'a> Matrix<'a> {
     }
 
     /// Store new keycodes in the global keyreport
-    async fn local_to_global_keyreport(&mut self) {
-        // get a lock to the global key report
-        if let Ok(mut key_report) = KEY_REPORT.try_lock() {
-            let mut keys_to_remove: Vec<KeyboardUsage, REGISTERED_KEYS_BUFFER> = Vec::new();
+    async fn local_to_global_keyreport(
+        &mut self,
+        key_report_sender: Sender<'a, CriticalSectionRawMutex, KeyboardReport, 2>,
+    ) {
+        let mut keys_to_remove: Vec<KeyboardUsage, REGISTERED_KEYS_BUFFER> = Vec::new();
 
-            for key in self.registered_keys.iter_mut() {
-                match key.state {
-                    KeyState::Pressed => {
-                        // in case the key code is not contained in the key_report, add it
-                        if let None = key_report
+        for key in self.registered_keys.iter_mut() {
+            match key.state {
+                KeyState::Pressed => {
+                    // in case the key code is not contained in the key_report, add it
+                    if let Some(key_report_sender) = key_report_sender.try_get() {
+                        if let None = key_report_sender
                             .keycodes
                             .iter()
                             .find(|kc| *kc == &(key.code as u8))
@@ -103,32 +107,38 @@ impl<'a> Matrix<'a> {
                                 .iter_mut()
                                 .position(|element| element == &(0 as u8))
                             {
-                                key_report.keycodes[position] = key.code as u8;
+                                key_report_sender.send_modify(|key_report| {
+                                    key_report.unwrap().keycodes[position] = key.code as u8
+                                });
                             }
                         }
                     }
-                    KeyState::Released => {
-                        if let Some(position) = key_report
+                }
+                KeyState::Released => {
+                    if let Some(key_report_sender) = key_report_sender.try_get() {
+                        if let Some(position) = key_report_sender
                             .keycodes
                             .iter()
                             .position(|kc| *kc == key.code as u8)
                         {
-                            key_report.keycodes[position] = 0;
-                        }
+                            key_report_sender.send_modify(|key_report| {
+                                key_report.unwrap().keycodes[position] = 0 as u8
+                            });
 
-                        // remember the key to be removed
-                        keys_to_remove
-                            .push(key.code)
-                            .expect("[matrix] keys_to_remove is full");
+                            // remember the key to be removed
+                            keys_to_remove
+                                .push(key.code)
+                                .expect("[matrix] keys_to_remove is full");
+                        }
                     }
                 }
             }
+        }
 
-            // remove the released keys
-            while let Some(kc) = keys_to_remove.pop() {
-                if let Some(position) = self.registered_keys.iter().position(|k| k.code == kc) {
-                    self.registered_keys.remove(position);
-                }
+        // remove the released keys
+        while let Some(kc) = keys_to_remove.pop() {
+            if let Some(position) = self.registered_keys.iter().position(|k| k.code == kc) {
+                self.registered_keys.remove(position);
             }
         }
     }
@@ -215,6 +225,8 @@ impl<'a> Matrix<'a> {
 }
 
 pub async fn scan_matrix<'a>(mut matrix_peri: Matrix<'a>) {
+    let mut key_report_sender = KEY_REPORT.sender();
+
     loop {
         // run the matrix scan
         matrix_peri.scan().await;
@@ -223,6 +235,8 @@ pub async fn scan_matrix<'a>(mut matrix_peri: Matrix<'a>) {
         matrix_peri.debounce_keys().await;
 
         // store to global keyreport
-        matrix_peri.local_to_global_keyreport().await;
+        matrix_peri
+            .local_to_global_keyreport(&mut key_report_sender)
+            .await;
     }
 }

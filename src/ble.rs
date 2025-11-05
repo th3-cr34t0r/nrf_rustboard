@@ -1,6 +1,6 @@
 use defmt::{error, info};
 use embassy_executor::Spawner;
-use embassy_futures::select::select;
+use embassy_futures::select::{select, select3};
 use embassy_nrf::mode::Async;
 
 use embassy_nrf::peripherals::RNG;
@@ -37,6 +37,7 @@ use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor};
 
 use crate::ble::services::Server;
 use crate::peripherals::BlePeri;
+use crate::{KEY_REPORT, delay_ms};
 mod services;
 
 bind_interrupts!(struct Irqs {
@@ -229,12 +230,14 @@ pub async fn ble_run<RNG>(
                 // set bondable
                 conn.raw().set_bondable(true).unwrap();
 
-                info!("[adv] Connected!");
+                info!("[adv] Connected! Running service tasks");
 
-                let gatt_events_task = gatt_events_handler(&conn, &server);
-                let custom_task = custom_task(&conn, &server);
-
-                select(gatt_events_task, custom_task).await;
+                select3(
+                    gatt_events_handler(&conn, &server),
+                    battery_service_task(&conn, &server),
+                    keyboard_service_task(&conn, &server),
+                )
+                .await;
             }
             Err(e) => {
                 error!("{}", e);
@@ -346,54 +349,49 @@ async fn gatt_events_handler<'stack, 'server>(
     error!("Disconnected reason: {}", reason);
 }
 
-async fn custom_task<'stack, 'server>(
+async fn battery_service_task<'stack, 'server>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
 ) {
     let battery_characteristic = server.battery_service.level;
 
     let mut tick: u8 = 0;
-    let empty_buff = [0u8; 8];
-    let mut buff = [0u8; 8];
-    let mut sent = false;
-
-    let mut keyboard_report = KeyboardReport::default();
-
-    keyboard_report.keycodes[0] = KeyboardUsage::KeyboardAa as u8;
-
-    let _n = serialize(&mut buff, &keyboard_report).unwrap();
 
     loop {
         tick = tick.wrapping_add(1);
-        if battery_characteristic.notify(conn, &tick).await.is_err() {
-            break;
+        match battery_characteristic.notify(conn, &tick).await {
+            Ok(_) => info!("[notify] battery level notified successfully"),
+            Err(e) => {
+                info!("[notify] battery level error: {}", e);
+                break;
+            }
         }
 
-        if !sent {
+        // send notification every 1 minute
+        delay_ms(60000).await;
+    }
+}
+async fn keyboard_service_task<'stack, 'server>(
+    conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
+    server: &'server Server<'_>,
+) {
+    let mut buff = [0u8; 8];
+
+    let key_report = KEY_REPORT
+        .receiver()
+        .expect("[ble] maximum number of receivers reached");
+
+    loop {
+        if let key_report = key_report.changed().await {
+            let _n = serialize(&mut buff, &keyboard_report).unwrap();
+
             match server.hid_service.input_keyboard.notify(conn, &buff).await {
-                Ok(_) => info!("[notify] notified successfully: {}", buff),
+                Ok(_) => info!("[notify] input keyboard notified successfully: {}", buff),
                 Err(e) => {
                     info!("[notify] ERROR: {}", e);
                     break;
                 }
             }
-
-            sent = !sent;
-        } else {
-            match server
-                .hid_service
-                .input_keyboard
-                .notify(conn, &empty_buff)
-                .await
-            {
-                Ok(_) => info!("[notify] notified successfully: {}", empty_buff),
-                Err(e) => {
-                    info!("[notify] ERROR: {}", e);
-                    break;
-                }
-            }
-            sent = !sent;
         }
-        Timer::after_millis(2000).await;
     }
 }

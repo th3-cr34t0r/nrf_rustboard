@@ -9,11 +9,11 @@ pub mod keymap;
 pub mod matrix;
 pub mod peripherals;
 
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, watch::Watch};
 use usbd_hid::descriptor::KeyboardReport;
 
-pub static KEY_REPORT: Mutex<CriticalSectionRawMutex, KeyboardReport> =
-    Mutex::new(KeyboardReport::default());
+pub static KEY_REPORT: Watch<CriticalSectionRawMutex, KeyboardReport, 2> =
+    KeyboardReport::default();
 
 use embassy_time::{Duration, Timer};
 pub async fn delay_ms(delay: u64) {
