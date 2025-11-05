@@ -1,4 +1,5 @@
-use crate::config::{ASYNC_ROW_WAIT, COLS, KEY_DEBOUNCE, REGISTERED_KEYS_BUFFER, ROWS};
+use crate::config::{ASYNC_ROW_WAIT, COLS, KEY_DEBOUNCE, LAYERS, REGISTERED_KEYS_BUFFER, ROWS};
+use crate::keymap::provide_keymap;
 use crate::{KEY_REPORT, delay_ms, delay_us};
 
 use core::pin::pin;
@@ -51,31 +52,24 @@ impl Default for Key {
     }
 }
 
-impl Key {
-    fn new(code: KeyboardUsage, position: KeyPos, time: Instant, state: KeyState) -> Self {
-        Self {
-            code,
-            position,
-            time,
-            state,
-        }
-    }
-}
-
 pub struct Matrix<'a> {
     rows: [Output<'a>; ROWS],
     cols: [Input<'a>; COLS],
-    registered_keys: Vec<Key, REGISTERED_KEYS_BUFFER>,
     layer: u8,
+    registered_keys: Vec<Key, REGISTERED_KEYS_BUFFER>,
+    keymap: [[COLS; ROWS]; LAYERS],
 }
 
 impl<'a> Matrix<'a> {
     pub fn init(rows: [Output<'a>; ROWS], cols: [Input<'a>; COLS]) -> Self {
+        let keymap = provide_keymap();
+
         Self {
             rows,
             cols,
-            registered_keys: Vec::new(),
             layer: 0,
+            registered_keys: Vec::new(),
+            keymap,
         }
     }
 
@@ -89,7 +83,9 @@ impl<'a> Matrix<'a> {
         });
     }
 
+    /// Store new keycodes in the global keyreport
     async fn local_to_global_keyreport(&mut self) {
+        // get a lock to the global key report
         if let Ok(mut key_report) = KEY_REPORT.try_lock() {
             let mut keys_to_remove: Vec<KeyboardUsage, REGISTERED_KEYS_BUFFER> = Vec::new();
 
@@ -198,16 +194,16 @@ impl<'a> Matrix<'a> {
                     }
                     // else add it
                     else {
-                        let _ = self.registered_keys.push(Key::new(
-                            KeyboardUsage::KeyboardErrorUndefined,
-                            KeyPos {
+                        let _ = self.registered_keys.push(Key {
+                            code: self.keymap[col_count][row_count][self.layer],
+                            position: KeyPos {
                                 row: row_count as u8,
                                 col: col_count as u8,
                                 layer: self.layer,
                             },
-                            Instant::now(),
-                            KeyState::Pressed,
-                        ));
+                            time: Instant::now(),
+                            state: KeyState::Pressed,
+                        });
                     }
                 }
             }

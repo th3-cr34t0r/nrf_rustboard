@@ -5,6 +5,8 @@ pub mod ble;
 pub mod config;
 pub mod debounce;
 pub mod key_provision;
+pub mod keycodes;
+pub mod keymap;
 pub mod matrix;
 pub mod peripherals;
 
