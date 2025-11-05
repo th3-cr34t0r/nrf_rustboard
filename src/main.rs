@@ -8,7 +8,7 @@ use nrf_rustboard::matrix::scan_matrix;
 
 use defmt::unwrap;
 use embassy_executor::Spawner;
-use embassy_futures::join::join4;
+use embassy_futures::join::join;
 
 use nrf_rustboard::ble::ble_run;
 use nrf_rustboard::peripherals::AppPeri;
@@ -24,11 +24,9 @@ async fn main(spawner: Spawner) {
     let (sdc, mpsl, storage, mut rng) = unwrap!(ble_init(p.ble_peri));
 
     // run tasks
-    let _ = join4(
+    let _ = join(
         ble_run(sdc, &mpsl, storage, &mut rng, spawner),
         scan_matrix(p.matrix_peri),
-        debounce(),
-        key_provision(),
     )
     .await;
 }
