@@ -388,7 +388,7 @@ pub enum KC {
     LeftShift = KeyboardUsage::KeyboardLeftShift,
     LAlt = KeyboardUsage::KeyboardLeftAlt,
     LGUI = KeyboardUsage::KeyboardLeftGUI,
-    RControl = KeyboardUsage::KeyboardRightControl,
+    RCtrs = KeyboardUsage::KeyboardRightControl,
     RShift = KeyboardUsage::KeyboardRightShift,
     RAlt = KeyboardUsage::KeyboardRightAlt,
     RGUI = KeyboardUsage::KeyboardRightGUI,
@@ -409,4 +409,96 @@ pub enum KC {
     L4 = 0xF3,
     /// Layer 5
     L5 = 0xF4,
+}
+
+impl KC {
+    pub fn get_modifier(&self) -> u8 {
+        match self {
+            KC::LCtrl => 0x01,
+            KC::LShift => 0x02,
+            KC::LAlt => 0x04,
+            KC::LGUI => 0x08,
+            // KC::RShift => {}
+            // KC::RCtrs => {}
+            // KC::RAlt => {}
+            // KC::RGUI => {}
+            _ => 0x00,
+        }
+    }
+
+    pub fn get_layer(&self) -> u8 {
+        match self {
+            KC::L1 => 1,
+            KC::L2 => 2,
+            KC::L3 => 3,
+            KC::L4 => 4,
+            KC::L5 => 5,
+            _ => 0,
+        }
+    }
+}
+
+pub enum KeyType {
+    Combo,
+    Macro,
+    Modifier,
+    Mouse,
+    Key,
+    Layer,
+}
+
+impl KeyType {
+    pub fn check_type(key: &KC) -> KeyType {
+        match *key {
+            // // return Macro key type
+            // KC::MaLP
+            // | KC::MaRP
+            // | KC::MaCp
+            // | KC::MaPa
+            // | KC::MaEx
+            // | KC::MaAt
+            // | KC::MaHs
+            // | KC::MaDl
+            // | KC::MaMd
+            // | KC::MaCa
+            // | KC::MaAmp
+            // | KC::MaAst
+            // | KC::MaSL
+            // | KC::MaLB
+            // | KC::MaRB
+            // | KC::MaPipe => KeyType::Macro,
+
+            // return Layer key type
+            KC::L1 | KC::L2 | KC::L3 | KC::L4 | KC::L5 => KeyType::Layer,
+
+            // return Modifier key type
+            KC::LShift
+            | KC::LCtrl
+            | KC::LAlt
+            | KC::LGUI
+            | KC::RShift
+            | KC::RCtrs
+            | KC::RAlt
+            | KC::RGUI => KeyType::Modifier,
+
+            // // return Mouse key type
+            // KC::MoGL
+            // | KC::MoGD
+            // | KC::MoGU
+            // | KC::MoGR
+            // | KC::MoLC
+            // | KC::MoRC
+            // | KC::MoSL
+            // | KC::MoSR
+            // | KC::MoSU
+            // | KC::MoSD
+            // | KC::MoCF
+            // | KC::MoCN
+            // | KC::MoCS => KeyType::Mouse,
+
+            // return Combo key type
+            // KC::ComboCtrlD => KeyType::Combo,
+            _ => KeyType::Key,
+        }
+    }
 }
