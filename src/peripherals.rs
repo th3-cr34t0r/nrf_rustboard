@@ -77,11 +77,11 @@ impl<'a> AppPeri<'a> {
 
         // init cols
         let cols = [
-            Input::new(p.P0_31, Pull::Up),
-            Input::new(p.P0_29, Pull::Up),
-            Input::new(p.P0_02, Pull::Up),
-            Input::new(p.P1_15, Pull::Up),
-            Input::new(p.P1_13, Pull::Up),
+            Input::new(p.P0_31, Pull::Down),
+            Input::new(p.P0_29, Pull::Down),
+            Input::new(p.P0_02, Pull::Down),
+            Input::new(p.P1_15, Pull::Down),
+            Input::new(p.P1_13, Pull::Down),
         ];
 
         // init matrix

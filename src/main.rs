@@ -2,8 +2,6 @@
 #![no_main]
 
 use nrf_rustboard::ble::ble_init;
-use nrf_rustboard::debounce::debounce;
-use nrf_rustboard::key_provision::key_provision;
 use nrf_rustboard::matrix::scan_matrix;
 
 use defmt::unwrap;

@@ -1,10 +1,10 @@
 use embassy_time::Duration;
 
 pub const ROWS: usize = 4;
-pub const COLS: usize = 10;
-pub const LAYERS: usize = 3;
+pub const COLS: usize = 5;
+pub const LAYERS: usize = 2;
 
-pub const ASYNC_ROW_WAIT: u64 = 1000; // ms to wait for keypress
+pub const ASYNC_ROW_WAIT: u64 = 1; // ms to wait for keypress
 
 pub const REGISTERED_KEYS_BUFFER: usize = 16;
 

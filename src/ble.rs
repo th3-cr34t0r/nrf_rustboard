@@ -377,20 +377,19 @@ async fn keyboard_service_task<'stack, 'server>(
 ) {
     let mut buff = [0u8; 8];
 
-    let key_report = KEY_REPORT
+    let mut key_report = KEY_REPORT
         .receiver()
-        .expect("[ble] maximum number of receivers reached");
+        .expect("[ble] maximum number of receivers exceeded");
 
     loop {
-        if let key_report = key_report.changed().await {
-            let _n = serialize(&mut buff, &keyboard_report).unwrap();
+        let key_report = key_report.changed().await;
+        let _n = serialize(&mut buff, &key_report).unwrap();
 
-            match server.hid_service.input_keyboard.notify(conn, &buff).await {
-                Ok(_) => info!("[notify] input keyboard notified successfully: {}", buff),
-                Err(e) => {
-                    info!("[notify] ERROR: {}", e);
-                    break;
-                }
+        match server.hid_service.input_keyboard.notify(conn, &buff).await {
+            Ok(_) => info!("[notify] input keyboard notified successfully"),
+            Err(e) => {
+                info!("[notify] ERROR: {}", e);
+                break;
             }
         }
     }
