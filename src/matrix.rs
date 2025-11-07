@@ -4,7 +4,6 @@ use crate::keymap::provide_keymap;
 use crate::{KEY_REPORT, LAYER, REGISTERED_KEYS, delay_ms, delay_us};
 
 use core::pin::pin;
-use embassy_futures::join::join3;
 use embassy_futures::select::{Either, select, select_slice};
 use embassy_nrf::gpio::{Input, Output};
 use embassy_time::{Duration, Instant};
@@ -306,7 +305,7 @@ impl<'a> Matrix<'a> {
                         // else add it
                         else {
                             let _ = self.reg_keys_local_new.push(Key {
-                                code: self.keymap[self.layer as usize][row_count as usize]
+                                code: self.keymap[*LAYER.lock().await as usize][row_count as usize]
                                     [col_count as usize],
                                 position: KeyPos {
                                     row: row_count as u8,
