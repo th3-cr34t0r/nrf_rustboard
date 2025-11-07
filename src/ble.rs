@@ -241,7 +241,6 @@ pub async fn ble_run<RNG>(
             }
             Err(e) => {
                 error!("{}", e);
-                // Timer::after_millis(500).await;
             }
         }
     }
@@ -313,10 +312,10 @@ async fn gatt_events_handler<'stack, 'server>(
                     GattEvent::Read(event) => {
                         if event.handle() == hid_service.handle {
                             let value = server.get(&hid_service);
-                            info!("[gatt) Read Event to HID Characteristic: {:?}", value);
+                            info!("[gatt] Read Event to HID Characteristic: {:?}", value);
                         } else if event.handle() == battery_service.handle {
                             let value = server.get(&battery_service);
-                            info!("[gatt) Read Event to Level Characteristic: {:?}", value);
+                            info!("[gatt] Read Event to Level Characteristic: {:?}", value);
                         }
                     }
                     GattEvent::Write(event) => {
@@ -360,7 +359,10 @@ async fn battery_service_task<'stack, 'server>(
     loop {
         tick = tick.wrapping_add(1);
         match battery_characteristic.notify(conn, &tick).await {
-            Ok(_) => info!("[notify] battery level notified successfully"),
+            Ok(_) => {
+                #[cfg(feature = "debug")]
+                info!("[notify] battery level notified successfully");
+            }
             Err(e) => {
                 info!("[notify] battery level error: {}", e);
                 break;
@@ -377,18 +379,19 @@ async fn keyboard_service_task<'stack, 'server>(
 ) {
     let mut buff = [0u8; 8];
 
-    let mut key_report = KEY_REPORT
-        .receiver()
-        .expect("[ble] maximum number of receivers exceeded");
+    let key_report = KEY_REPORT.receiver();
 
     loop {
-        let key_report = key_report.changed().await;
+        let key_report = key_report.receive().await;
         let _n = serialize(&mut buff, &key_report).unwrap();
 
         match server.hid_service.input_keyboard.notify(conn, &buff).await {
-            Ok(_) => info!("[notify] input keyboard notified successfully"),
+            Ok(_) => {
+                #[cfg(feature = "debug")]
+                info!("[notify] input keyboard notified successfully")
+            }
             Err(e) => {
-                info!("[notify] ERROR: {}", e);
+                info!("[notify] input keyboard error: {}", e);
                 break;
             }
         }
