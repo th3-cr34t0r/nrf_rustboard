@@ -1,11 +1,10 @@
 use defmt::{error, info};
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, select3};
+use embassy_futures::select::select3;
 use embassy_nrf::mode::Async;
 
 use embassy_nrf::peripherals::RNG;
 use embassy_nrf::{bind_interrupts, qspi, rng};
-use embassy_time::Timer;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
     MPSL_RECOMMENDED_RC_CTIV, MPSL_RECOMMENDED_RC_TEMP_CTIV,
@@ -33,7 +32,7 @@ use trouble_host::prelude::{
 use trouble_host::{Address, BleHostError, Host, HostResources, IoCapabilities, Stack};
 
 use ssmarshal::{self, serialize};
-use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor};
+use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 use crate::ble::services::Server;
 use crate::peripherals::BlePeri;

@@ -17,8 +17,6 @@ pub static KEY_REPORT: Channel<ThreadModeRawMutex, KeyboardReport, 2> = Channel:
 pub static REGISTERED_KEYS: Channel<ThreadModeRawMutex, Vec<Key, { REGISTERED_KEYS_BUFFER }>, 4> =
     Channel::new();
 
-pub static LAYER: Mutex<ThreadModeRawMutex, u8> = Mutex::new(0);
-
 use embassy_time::{Duration, Timer};
 
 use crate::{config::REGISTERED_KEYS_BUFFER, matrix::Key};
