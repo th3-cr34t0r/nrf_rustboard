@@ -8,8 +8,9 @@ pub mod keycodes;
 pub mod keymap;
 pub mod matrix;
 pub mod peripherals;
+pub mod storage;
 
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use heapless::Vec;
 use usbd_hid::descriptor::KeyboardReport;
 

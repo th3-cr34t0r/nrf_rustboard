@@ -5,6 +5,7 @@ use embassy_nrf::mode::Async;
 
 use embassy_nrf::peripherals::RNG;
 use embassy_nrf::{bind_interrupts, qspi, rng};
+use embedded_storage_async::nor_flash::NorFlash;
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
     MPSL_RECOMMENDED_RC_CTIV, MPSL_RECOMMENDED_RC_TEMP_CTIV,
@@ -22,6 +23,7 @@ use nrf_sdc::{
 use rand::{CryptoRng, RngCore, SeedableRng};
 use rand_chacha::ChaCha12Rng;
 use static_cell::StaticCell;
+use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
@@ -29,14 +31,17 @@ use trouble_host::prelude::{
     AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
     Peripheral, Runner, appearance,
 };
-use trouble_host::{Address, BleHostError, Host, HostResources, IoCapabilities, Stack};
+use trouble_host::{Address, BleHostError, Host, HostResources, Stack};
+
+use crate::config::{BLE_NAME, SPLIT_PERIPHERAL};
+use crate::storage::{load_bonding_info, store_bonding_info};
 
 use ssmarshal::{self, serialize};
-use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 use crate::ble::services::Server;
 use crate::peripherals::BlePeri;
 use crate::{KEY_REPORT, delay_ms};
+
 mod services;
 
 bind_interrupts!(struct Irqs {
@@ -49,15 +54,14 @@ bind_interrupts!(struct Irqs {
     QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
 });
 
-const BLE_NAME: &str = "nRFRustboard";
-const CONNECTIONS_MAX: usize = 1;
-const L2CAP_CHANNELS_MAX: usize = 4;
-const ADV_SETS: usize = 1;
+const CONNECTIONS_MAX: usize = SPLIT_PERIPHERAL as usize + 1;
 
-type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
+const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
 
 /// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 5000; // bytes
+const SDC_MEMORY_SIZE: usize = 1744; // bytes
+
+type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
 
 const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
     source: MPSL_CLOCK_LF_SRC_RC as u8,
@@ -101,17 +105,7 @@ async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, De
     runner.run().await.expect("Host task failed to run");
 }
 
-pub fn ble_init(
-    ble_peri: BlePeri,
-) -> Result<
-    (
-        SoftdeviceController<'static>,
-        &'static MultiprotocolServiceLayer<'static>,
-        Flash<'static>,
-        ChaCha12Rng,
-    ),
-    nrf_sdc::Error,
-> {
+pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     let sdc_p = sdc_Peripherals::new(
         ble_peri.ppi_ch17,
         ble_peri.ppi_ch18,
@@ -141,16 +135,19 @@ pub fn ble_init(
         static SESSION_MEM: StaticCell<SessionMem<1>> = StaticCell::new();
 
         static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
-        MPSL.init(MultiprotocolServiceLayer::with_timeslots(
-            mpsl_peri,
-            Irqs,
-            LFCLK_CFG,
-            SESSION_MEM.init(SessionMem::new()),
-        )?)
+        MPSL.init(
+            MultiprotocolServiceLayer::with_timeslots(
+                mpsl_peri,
+                Irqs,
+                LFCLK_CFG,
+                SESSION_MEM.init(SessionMem::new()),
+            )
+            .expect("[ble] Error initializing MPSL"),
+        )
     };
 
     // Use internal Flash as storage
-    let storage = Flash::take(mpsl, ble_peri.nvmc);
+    let mut storage = Flash::take(mpsl, ble_peri.nvmc);
 
     let mut sdc_rng = {
         static SDC_RNG: StaticCell<rng::Rng<'static, Async>> = StaticCell::new();
@@ -162,22 +159,23 @@ pub fn ble_init(
         SDC_MEM.init(sdc_mem)
     };
 
-    let rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
+    let mut rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
 
-    let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem)?;
+    let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem).expect("[ble] Error building SDC");
 
-    Ok((sdc, mpsl, storage, rng))
+    ble_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
 }
 
 /// Run BLE
-pub async fn ble_run<RNG>(
+pub async fn ble_run<RNG, S>(
     sdc: SoftdeviceController<'static>,
     mpsl: &'static MultiprotocolServiceLayer<'static>,
-    storage: Flash<'static>,
+    mut storage: &mut S,
     rng: &mut RNG,
     spawner: Spawner,
 ) where
     RNG: RngCore + CryptoRng,
+    S: NorFlash,
 {
     // ble address
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
@@ -194,9 +192,20 @@ pub async fn ble_run<RNG>(
         STACK.init(
             trouble_host::new(sdc, resources)
                 .set_random_address(address)
-                .set_random_generator_seed(rng)
-                .set_io_capabilities(IoCapabilities::NoInputNoOutput), //suitable for a keyboard
+                .set_random_generator_seed(rng),
         )
+    };
+
+    info!("Flash capacity: {} KB", storage.capacity() / 1024);
+
+    // get the bond information
+    let mut bond_stored = if let Some(bond_info) = load_bonding_info(storage).await {
+        info!("[ble] loaded bond information");
+        stack.add_bond_information(bond_info).unwrap();
+        true
+    } else {
+        info!("[ble] no bond information found");
+        false
     };
 
     let Host {
@@ -204,10 +213,6 @@ pub async fn ble_run<RNG>(
         runner,
         ..
     } = stack.build();
-
-    // let mut bond_stored = if let Some (bond_info) = load_bond
-    let report_map = KeyboardReport::desc();
-    info!("[report_map] length: {}", report_map.len());
 
     // create the peripheral server
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
@@ -227,12 +232,15 @@ pub async fn ble_run<RNG>(
         match advertise(&mut peripheral, &server).await {
             Ok(conn) => {
                 // set bondable
-                conn.raw().set_bondable(true).unwrap();
+                conn.raw()
+                    .set_bondable(!bond_stored)
+                    .expect("[ble] error setting bondable");
 
+                info!("[adv] bond_stored: {}", bond_stored);
                 info!("[adv] Connected! Running service tasks");
 
                 select3(
-                    gatt_events_handler(&conn, &server),
+                    gatt_events_handler(&conn, &server, &mut storage, &mut bond_stored),
                     battery_service_task(&conn, &server),
                     keyboard_service_task(&conn, &server),
                 )
@@ -287,10 +295,12 @@ async fn advertise<'a, 'b>(
     Ok(conn)
 }
 
-async fn gatt_events_handler<'stack, 'server>(
+async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
-) {
+    storage: &mut S,
+    bond_stored: &mut bool,
+) -> Result<(), Error> {
     let hid_service = server.hid_service.report_map;
     let battery_service = server.battery_service.level;
 
@@ -302,6 +312,13 @@ async fn gatt_events_handler<'stack, 'server>(
                 bond,
             } => {
                 info!("[gatt] pairing complete: {:?}", security_level);
+                if let Some(bond) = bond {
+                    store_bonding_info(storage, &bond)
+                        .await
+                        .expect("[gatt] error storing bond info");
+                    *bond_stored = true;
+                    info!("[gatt] bond information stored");
+                }
             }
             GattConnectionEvent::PairingFailed(err) => {
                 error!("[gatt] pairing error: {:?}", err);
@@ -316,6 +333,17 @@ async fn gatt_events_handler<'stack, 'server>(
                             let value = server.get(&battery_service);
                             info!("[gatt] Read Event to Level Characteristic: {:?}", value);
                         }
+
+                        if conn
+                            .raw()
+                            .security_level()
+                            .expect("[gatt] error getting security level")
+                            .encrypted()
+                        {
+                            None
+                        } else {
+                            Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
+                        }
                     }
                     GattEvent::Write(event) => {
                         if event.handle() == hid_service.handle {
@@ -329,8 +357,20 @@ async fn gatt_events_handler<'stack, 'server>(
                                 event.data()
                             );
                         }
+
+                        if conn
+                            .raw()
+                            .security_level()
+                            .expect("[gatt] error getting security level")
+                            .encrypted()
+                        {
+                            None
+                        } else {
+                            Some(AttErrorCode::INSUFFICIENT_ENCRYPTION)
+                        }
                     }
-                    _ => {} // OTHER
+
+                    _ => None, // OTHER
                 };
 
                 match event.accept() {
@@ -345,6 +385,7 @@ async fn gatt_events_handler<'stack, 'server>(
     };
 
     error!("Disconnected reason: {}", reason);
+    Ok(())
 }
 
 async fn battery_service_task<'stack, 'server>(
