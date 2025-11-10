@@ -83,12 +83,10 @@ pub async fn store_bonding_info<S: NorFlash>(
     storage: &mut S,
     info: &BondInformation,
 ) -> Result<(), sequential_storage::Error<S::Error>> {
-    // let start_addr = 0xA0000 as u32;
-    let start_addr = 0x0006_0000 as u32;
+    let start_addr = 0xA0000 as u32;
     let storage_range = start_addr..(start_addr + 8 * S::ERASE_SIZE as u32);
 
     sequential_storage::erase_all(storage, storage_range.clone()).await?;
-    // sequential_storage::erase_all(storage, 0..S::ERASE_SIZE as u32).await?;
 
     let mut buffer = [0; 32];
     let key = StoredAddr(info.identity.bd_addr);
