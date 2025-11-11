@@ -196,12 +196,10 @@ pub async fn ble_run<RNG, S>(
         )
     };
 
-    info!("Flash capacity: {} KB", storage.capacity() / 1024);
-
     // get the bond information
     let mut bond_stored = if let Some(bond_info) = load_bonding_info(storage).await {
-        info!("[ble] loaded bond information");
         stack.add_bond_information(bond_info).unwrap();
+        info!("[ble] loaded bond information");
         true
     } else {
         info!("[ble] no bond information found");
