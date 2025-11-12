@@ -1,4 +1,6 @@
-use crate::config::{ASYNC_ROW_WAIT, COLS, KEY_DEBOUNCE, REGISTERED_KEYS_BUFFER, ROWS};
+use crate::config::{
+    COLS, ENTER_SLEEP_DEBOUNCE, KEY_DEBOUNCE, KEY_INTERUPT_DEBOUNCE, REGISTERED_KEYS_BUFFER, ROWS,
+};
 use crate::keycodes::KC;
 use crate::{REGISTERED_KEYS, delay_ms, delay_us};
 
@@ -54,7 +56,8 @@ pub struct Matrix<'a> {
     cols: [Input<'a>; COLS],
     reg_keys_local_new: Vec<Key, REGISTERED_KEYS_BUFFER>,
     reg_keys_local_old: Vec<Key, REGISTERED_KEYS_BUFFER>,
-    keys_sent_time: Instant,
+    reg_keys_local_written_time: Instant,
+    reg_key_last_time: Instant,
 }
 
 impl<'a> Matrix<'a> {
@@ -64,7 +67,8 @@ impl<'a> Matrix<'a> {
             cols,
             reg_keys_local_new: Vec::new(),
             reg_keys_local_old: Vec::new(),
-            keys_sent_time: Instant::now(),
+            reg_keys_local_written_time: Instant::now(),
+            reg_key_last_time: Instant::now(),
         }
     }
 
@@ -81,13 +85,23 @@ impl<'a> Matrix<'a> {
         }
     }
 
+    fn is_elapsed(time: Instant, debounce: Duration) -> bool {
+        if Instant::now() >= time + debounce {
+            true
+        } else {
+            false
+        }
+    }
+
     /// Main function for scanning and registering keys
     pub async fn scan(&mut self) {
         loop {
-            for (row_count, row) in self.rows.iter_mut().enumerate() {
-                row.set_high();
-                // delay so port propagates
-                delay_us(1).await;
+            if is_elapsed(self.reg_key_last_time, KEY_INTERUPT_DEBOUNCE) {
+                for row in self.rows.iter_mut() {
+                    row.set_high();
+                    // delay so port propagates
+                    delay_us(1).await;
+                }
 
                 // set cols wait for high
                 {
@@ -99,20 +113,25 @@ impl<'a> Matrix<'a> {
 
                     match select(
                         select_slice(pin!(futures.as_mut_slice())),
-                        delay_ms(ASYNC_ROW_WAIT),
+                        delay_ms(ENTER_SLEEP_DEBOUNCE),
                     )
                     .await
                     {
                         Either::First(_) => {
-                            // key has been pressed
+                            // key has been pressed, scan it
                         }
                         Either::Second(()) => {
-                            // time is up, continue with the next row
-                            row.set_low();
-                            continue;
+                            // enter sleep
+                            // TODO:
                         }
                     }
                 }
+            }
+
+            for (row_count, row) in self.rows.iter_mut().enumerate() {
+                row.set_high();
+                // delay so port propagates
+                delay_us(1).await;
 
                 // get the pressed keys
                 for (col_count, col) in self.cols.iter().enumerate() {
@@ -121,6 +140,8 @@ impl<'a> Matrix<'a> {
                             row: row_count as u8,
                             col: col_count as u8,
                         };
+
+                        let registered_key_time = Instant::now();
 
                         // store the registered key in an the vec
                         if let Some(contained_key) = self
@@ -139,10 +160,13 @@ impl<'a> Matrix<'a> {
                                     row: row_count as u8,
                                     col: col_count as u8,
                                 },
-                                time: Instant::now(),
+                                time: registered_key_time,
                                 state: KeyState::Pressed,
                             });
                         }
+
+                        // store the registered key time
+                        self.reg_key_last_time = registered_key_time;
                     }
                 }
 
@@ -151,7 +175,7 @@ impl<'a> Matrix<'a> {
             }
 
             // run debounce every 1 ms
-            if Instant::now() >= self.keys_sent_time + Duration::from_millis(1) {
+            if Instant::now() >= self.reg_keys_local_written_time + Duration::from_millis(1) {
                 self.debounce().await;
 
                 if self.reg_keys_local_new != self.reg_keys_local_old {
@@ -171,7 +195,7 @@ impl<'a> Matrix<'a> {
                     self.reg_keys_local_new.remove(position);
                 }
                 self.reg_keys_local_old = self.reg_keys_local_new.iter().cloned().collect();
-                self.keys_sent_time = Instant::now();
+                self.reg_keys_local_written_time = Instant::now();
             }
         }
     }

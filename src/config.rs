@@ -12,8 +12,13 @@ pub const BLE_NAME: &str = "Rustboard";
 /// Specify if the keyboard is split
 pub const SPLIT_PERIPHERAL: bool = true;
 
-pub const ASYNC_ROW_WAIT: u64 = 1; // ms to wait for keypress
-
 pub const REGISTERED_KEYS_BUFFER: usize = 16;
 
+/// Wait for a given time before entering sleep in ms
+pub const ENTER_SLEEP_DEBOUNCE: u64 = 600000;
+
+/// Enter interupt on key debounce
+pub const KEY_INTERUPT_DEBOUNCE: Duration = Duration::from_millis(1);
+
+/// Debounce key in ms
 pub const KEY_DEBOUNCE: Duration = Duration::from_millis(20);
