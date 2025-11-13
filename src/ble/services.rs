@@ -4,10 +4,15 @@ use trouble_host::prelude::{
 };
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
+/// Custom service for the split peripheral
+const SPLIT_PERIPHERAL: BluetoothUuid16 = BluetoothUuid16::new(0xff11);
+const SPLIT_REPORT: BluetoothUuid16 = BluetoothUuid16::new(0xff22);
+
 #[gatt_server]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,
+    pub(crate) split_servite: SplitService,
 }
 
 #[gatt_service(uuid = service::BATTERY)]
@@ -35,6 +40,12 @@ pub(crate) struct HidService {
     #[descriptor(uuid = "2908", read, value = [0u8, 2u8])]
     #[characteristic(uuid = "2a4d", read, write, write_without_response)]
     pub(crate) output_keyboard: [u8; 1],
+}
+
+#[gatt_service(uuid = SPLIT_PERIPHERAL)]
+pub(crate) struct SplitService {
+    #[characteristic(uuid = "ff22", read, notify)]
+    pub(crate) registered_keys: [u8; 6],
 }
 
 pub struct BleHidServer {

@@ -1,99 +1,34 @@
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::select::select3;
-use embassy_nrf::mode::Async;
 
-use embassy_nrf::peripherals::RNG;
-use embassy_nrf::{bind_interrupts, qspi, rng};
+use embassy_nrf::pac::FICR;
 use embedded_storage_async::nor_flash::NorFlash;
-use nrf_mpsl::raw::{
-    MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
-    MPSL_RECOMMENDED_RC_CTIV, MPSL_RECOMMENDED_RC_TEMP_CTIV,
-};
-use nrf_mpsl::{Flash, Peripherals as mpsl_Peripherals};
 use nrf_sdc::Error;
+use nrf_sdc::SoftdeviceController;
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
-use nrf_sdc::{
-    self as sdc, Peripherals as sdc_Peripherals, SoftdeviceController,
-    mpsl::{
-        ClockInterruptHandler, HighPrioInterruptHandler, LowPrioInterruptHandler, SessionMem,
-        raw::mpsl_clock_lfclk_cfg_t,
-    },
-};
-use rand::{CryptoRng, RngCore, SeedableRng};
-use rand_chacha::ChaCha12Rng;
+use rand::{CryptoRng, RngCore};
 use static_cell::StaticCell;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
+use trouble_host::prelude::Runner;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
     AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
-    Peripheral, Runner, appearance,
+    Peripheral, appearance,
 };
-use trouble_host::{Address, BleHostError, Host, HostResources, Stack};
+use trouble_host::{Address, BleHostError, Host, Stack};
 
-use crate::config::{BLE_NAME, SPLIT_PERIPHERAL};
+use crate::ble::BleHostResources;
+use crate::ble::get_device_address;
+use crate::config::BLE_NAME;
 use crate::storage::{load_bonding_info, store_bonding_info};
 
 use ssmarshal::{self, serialize};
 
 use crate::ble::services::Server;
-use crate::peripherals::BlePeri;
 use crate::{KEY_REPORT, delay_ms};
-
-mod services;
-
-bind_interrupts!(struct Irqs {
-    RNG => rng::InterruptHandler<RNG>;
-    EGU0_SWI0 => LowPrioInterruptHandler;
-    CLOCK_POWER => ClockInterruptHandler;
-    RADIO => HighPrioInterruptHandler;
-    TIMER0 => HighPrioInterruptHandler;
-    RTC0 => HighPrioInterruptHandler;
-    QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
-});
-
-const CONNECTIONS_MAX: usize = SPLIT_PERIPHERAL as usize + 1;
-
-const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
-
-/// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 1744; // bytes
-
-type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
-
-const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
-    source: MPSL_CLOCK_LF_SRC_RC as u8,
-    rc_ctiv: MPSL_RECOMMENDED_RC_CTIV as u8,
-    rc_temp_ctiv: MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
-    accuracy_ppm: MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
-    skip_wait_lfclk_started: MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
-};
-
-/// How many outgoing L2CAP buffers per link
-const L2CAP_TXQ: u8 = 3;
-
-/// How many incoming L2CAP buffers per link
-const L2CAP_RXQ: u8 = 3;
-
-/// Size of L2CAP packets
-const L2CAP_MTU: usize = 72;
-
-/// Build SoftDevice
-fn build_sdc<'a, const N: usize>(
-    p: nrf_sdc::Peripherals<'a>,
-    rng: &'a mut rng::Rng<Async>,
-    mpsl: &'a MultiprotocolServiceLayer,
-    mem: &'a mut sdc::Mem<N>,
-) -> Result<SoftdeviceController<'a>, nrf_sdc::Error> {
-    sdc::Builder::new()?
-        .support_adv()?
-        .support_peripheral()?
-        .peripheral_count(1)?
-        .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
-        .build(p, rng, mpsl, mem)
-}
 
 #[embassy_executor::task]
 async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
@@ -105,69 +40,8 @@ async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, De
     runner.run().await.expect("Host task failed to run");
 }
 
-pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
-    let sdc_p = sdc_Peripherals::new(
-        ble_peri.ppi_ch17,
-        ble_peri.ppi_ch18,
-        ble_peri.ppi_ch20,
-        ble_peri.ppi_ch21,
-        ble_peri.ppi_ch22,
-        ble_peri.ppi_ch23,
-        ble_peri.ppi_ch24,
-        ble_peri.ppi_ch25,
-        ble_peri.ppi_ch26,
-        ble_peri.ppi_ch27,
-        ble_peri.ppi_ch28,
-        ble_peri.ppi_ch29,
-    );
-
-    let sdc_mem = sdc::Mem::<SDC_MEMORY_SIZE>::new();
-
-    let mpsl = {
-        let mpsl_peri = mpsl_Peripherals::new(
-            ble_peri.rtc0,
-            ble_peri.timer0,
-            ble_peri.temp,
-            ble_peri.ppi_ch19,
-            ble_peri.ppi_ch30,
-            ble_peri.ppi_ch31,
-        );
-        static SESSION_MEM: StaticCell<SessionMem<1>> = StaticCell::new();
-
-        static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
-        MPSL.init(
-            MultiprotocolServiceLayer::with_timeslots(
-                mpsl_peri,
-                Irqs,
-                LFCLK_CFG,
-                SESSION_MEM.init(SessionMem::new()),
-            )
-            .expect("[ble] Error initializing MPSL"),
-        )
-    };
-
-    // Use internal Flash as storage
-    let mut storage = Flash::take(mpsl, ble_peri.nvmc);
-
-    let mut sdc_rng = {
-        static SDC_RNG: StaticCell<rng::Rng<'static, Async>> = StaticCell::new();
-        SDC_RNG.init(rng::Rng::new(ble_peri.rng, Irqs))
-    };
-
-    let sdc_mem = {
-        static SDC_MEM: StaticCell<sdc::Mem<SDC_MEMORY_SIZE>> = StaticCell::new();
-        SDC_MEM.init(sdc_mem)
-    };
-
-    let mut rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
-
-    let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem).expect("[ble] Error building SDC");
-
-    ble_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
-}
-
-/// Run BLE
-pub async fn ble_run<RNG, S>(
+/// run ble
+pub async fn ble_peripheral_run<RNG, S>(
     sdc: SoftdeviceController<'static>,
     mpsl: &'static MultiprotocolServiceLayer<'static>,
     mut storage: &mut S,
@@ -178,7 +52,7 @@ pub async fn ble_run<RNG, S>(
     S: NorFlash,
 {
     // ble address
-    let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
+    let address: Address = get_device_address();
     info!("[ble] addrress: {}", address);
 
     let resources = {

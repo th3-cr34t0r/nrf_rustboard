@@ -1,0 +1,155 @@
+use embassy_executor::Spawner;
+use embassy_nrf::mode::Async;
+
+use embassy_nrf::pac::FICR;
+use embassy_nrf::peripherals::RNG;
+use embassy_nrf::{bind_interrupts, qspi, rng};
+use nrf_mpsl::raw::{
+    MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
+    MPSL_RECOMMENDED_RC_CTIV, MPSL_RECOMMENDED_RC_TEMP_CTIV,
+};
+use nrf_mpsl::{Flash, Peripherals as mpsl_Peripherals};
+use nrf_sdc::mpsl::MultiprotocolServiceLayer;
+use nrf_sdc::{
+    self as sdc, Peripherals as sdc_Peripherals, SoftdeviceController,
+    mpsl::{
+        ClockInterruptHandler, HighPrioInterruptHandler, LowPrioInterruptHandler, SessionMem,
+        raw::mpsl_clock_lfclk_cfg_t,
+    },
+};
+use rand::SeedableRng;
+use rand_chacha::ChaCha12Rng;
+use static_cell::StaticCell;
+use trouble_host::prelude::DefaultPacketPool;
+use trouble_host::{Address, HostResources};
+
+use crate::config::SPLIT_PERIPHERAL;
+
+use crate::peripherals::BlePeri;
+
+mod central;
+mod peripheral;
+mod services;
+
+bind_interrupts!(struct Irqs {
+    RNG => rng::InterruptHandler<RNG>;
+    EGU0_SWI0 => LowPrioInterruptHandler;
+    CLOCK_POWER => ClockInterruptHandler;
+    RADIO => HighPrioInterruptHandler;
+    TIMER0 => HighPrioInterruptHandler;
+    RTC0 => HighPrioInterruptHandler;
+    QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
+});
+
+const CONNECTIONS_MAX: usize = SPLIT_PERIPHERAL as usize + 1;
+
+const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
+
+/// How many outgoing L2CAP buffers per link
+const L2CAP_TXQ: u8 = 3;
+
+/// How many incoming L2CAP buffers per link
+const L2CAP_RXQ: u8 = 3;
+
+/// Size of L2CAP packets
+const L2CAP_MTU: usize = 72;
+
+/// Default memory allocation for softdevice controller in bytes.
+const SDC_MEMORY_SIZE: usize = 1744; // bytes
+
+type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
+
+const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
+    source: MPSL_CLOCK_LF_SRC_RC as u8,
+    rc_ctiv: MPSL_RECOMMENDED_RC_CTIV as u8,
+    rc_temp_ctiv: MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
+    accuracy_ppm: MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
+    skip_wait_lfclk_started: MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
+};
+
+/// Build SoftDevice
+fn build_sdc<'a, const N: usize>(
+    p: nrf_sdc::Peripherals<'a>,
+    rng: &'a mut rng::Rng<Async>,
+    mpsl: &'a MultiprotocolServiceLayer,
+    mem: &'a mut sdc::Mem<N>,
+) -> Result<SoftdeviceController<'a>, nrf_sdc::Error> {
+    sdc::Builder::new()?
+        .support_adv()?
+        .support_peripheral()?
+        .peripheral_count(1)?
+        .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
+        .build(p, rng, mpsl, mem)
+}
+
+pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
+    let sdc_p = sdc_Peripherals::new(
+        ble_peri.ppi_ch17,
+        ble_peri.ppi_ch18,
+        ble_peri.ppi_ch20,
+        ble_peri.ppi_ch21,
+        ble_peri.ppi_ch22,
+        ble_peri.ppi_ch23,
+        ble_peri.ppi_ch24,
+        ble_peri.ppi_ch25,
+        ble_peri.ppi_ch26,
+        ble_peri.ppi_ch27,
+        ble_peri.ppi_ch28,
+        ble_peri.ppi_ch29,
+    );
+
+    let sdc_mem = sdc::Mem::<SDC_MEMORY_SIZE>::new();
+
+    let mpsl = {
+        let mpsl_peri = mpsl_Peripherals::new(
+            ble_peri.rtc0,
+            ble_peri.timer0,
+            ble_peri.temp,
+            ble_peri.ppi_ch19,
+            ble_peri.ppi_ch30,
+            ble_peri.ppi_ch31,
+        );
+        static SESSION_MEM: StaticCell<SessionMem<1>> = StaticCell::new();
+
+        static MPSL: StaticCell<MultiprotocolServiceLayer> = StaticCell::new();
+        MPSL.init(
+            MultiprotocolServiceLayer::with_timeslots(
+                mpsl_peri,
+                Irqs,
+                LFCLK_CFG,
+                SESSION_MEM.init(SessionMem::new()),
+            )
+            .expect("[ble] Error initializing MPSL"),
+        )
+    };
+
+    // Use internal Flash as storage
+    let mut storage = Flash::take(mpsl, ble_peri.nvmc);
+
+    let mut sdc_rng = {
+        static SDC_RNG: StaticCell<rng::Rng<'static, Async>> = StaticCell::new();
+        SDC_RNG.init(rng::Rng::new(ble_peri.rng, Irqs))
+    };
+
+    let sdc_mem = {
+        static SDC_MEM: StaticCell<sdc::Mem<SDC_MEMORY_SIZE>> = StaticCell::new();
+        SDC_MEM.init(sdc_mem)
+    };
+
+    let mut rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
+
+    let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem).expect("[ble] Error building SDC");
+
+    #[cfg(feature = "central")]
+    crate::ble::central::ble_central_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
+    #[cfg(feature = "peripheral")]
+    crate::ble::peripheral::ble_peripheral_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
+}
+
+pub fn get_device_address() -> Address {
+    let addr_0 = FICR.deviceaddr(0).read().to_le_bytes();
+    let addr_1 = FICR.deviceaddr(1).read().to_le_bytes();
+    Address::random([
+        addr_0[0], addr_0[1], addr_0[2], addr_0[3], addr_1[0], addr_1[1],
+    ])
+}

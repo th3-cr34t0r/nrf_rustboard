@@ -85,8 +85,8 @@ impl<'a> Matrix<'a> {
         }
     }
 
-    fn is_elapsed(time: Instant, debounce: Duration) -> bool {
-        if Instant::now() >= time + debounce {
+    fn is_elapsed(time: &Instant, debounce: Duration) -> bool {
+        if Instant::now() >= *time + debounce {
             true
         } else {
             false
@@ -96,7 +96,7 @@ impl<'a> Matrix<'a> {
     /// Main function for scanning and registering keys
     pub async fn scan(&mut self) {
         loop {
-            if is_elapsed(self.reg_key_last_time, KEY_INTERUPT_DEBOUNCE) {
+            if Self::is_elapsed(&self.reg_key_last_time, KEY_INTERUPT_DEBOUNCE) {
                 for row in self.rows.iter_mut() {
                     row.set_high();
                     // delay so port propagates
@@ -175,7 +175,8 @@ impl<'a> Matrix<'a> {
             }
 
             // run debounce every 1 ms
-            if Instant::now() >= self.reg_keys_local_written_time + Duration::from_millis(1) {
+            if Self::is_elapsed(&self.reg_keys_local_written_time, Duration::from_millis(1)) {
+                // run debouncer
                 self.debounce().await;
 
                 if self.reg_keys_local_new != self.reg_keys_local_old {
