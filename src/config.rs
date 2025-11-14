@@ -12,7 +12,7 @@ pub const BLE_NAME: &str = "Rustboard";
 /// Specify if the keyboard is split
 pub const SPLIT_PERIPHERAL: bool = true;
 
-pub const REGISTERED_KEYS_BUFFER: usize = 16;
+pub const MATRIX_KEYS_BUFFER: usize = 16;
 
 /// Wait for a given time before entering sleep in ms
 pub const ENTER_SLEEP_DEBOUNCE: u64 = 600000;

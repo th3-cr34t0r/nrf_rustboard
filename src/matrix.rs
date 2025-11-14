@@ -1,8 +1,8 @@
 use crate::config::{
-    COLS, ENTER_SLEEP_DEBOUNCE, KEY_DEBOUNCE, KEY_INTERUPT_DEBOUNCE, REGISTERED_KEYS_BUFFER, ROWS,
+    COLS, ENTER_SLEEP_DEBOUNCE, KEY_DEBOUNCE, KEY_INTERUPT_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS,
 };
 use crate::keycodes::KC;
-use crate::{REGISTERED_KEYS, delay_ms, delay_us};
+use crate::{LAYER, MATRIX_KEYS, delay_ms, delay_us};
 
 use core::pin::pin;
 use embassy_futures::select::{Either, select, select_slice};
@@ -17,11 +17,16 @@ use defmt::info;
 pub struct KeyPos {
     pub row: u8,
     pub col: u8,
+    pub layer: u8,
 }
 
 impl KeyPos {
     pub fn default() -> Self {
-        Self { row: 255, col: 255 }
+        Self {
+            row: 255,
+            col: 255,
+            layer: 255,
+        }
     }
 }
 
@@ -54,10 +59,10 @@ impl Default for Key {
 pub struct Matrix<'a> {
     rows: [Output<'a>; ROWS],
     cols: [Input<'a>; COLS],
-    reg_keys_local_new: Vec<Key, REGISTERED_KEYS_BUFFER>,
-    reg_keys_local_old: Vec<Key, REGISTERED_KEYS_BUFFER>,
+    reg_keys_local_new: [KeyPos; MATRIX_KEYS_BUFFER],
+    // reg_keys_local_new: Vec<Key, MATRIX_KEYS_BUFFER>,
+    // reg_keys_local_old: Vec<Key, MATRIX_KEYS_BUFFER>,
     reg_keys_local_written_time: Instant,
-    reg_key_last_time: Instant,
 }
 
 impl<'a> Matrix<'a> {
@@ -65,23 +70,10 @@ impl<'a> Matrix<'a> {
         Self {
             rows,
             cols,
-            reg_keys_local_new: Vec::new(),
-            reg_keys_local_old: Vec::new(),
+            reg_keys_local_new: [KeyPos::default(); MATRIX_KEYS_BUFFER],
+            // reg_keys_local_new: Vec::new(),
+            // reg_keys_local_old: Vec::new(),
             reg_keys_local_written_time: Instant::now(),
-            reg_key_last_time: Instant::now(),
-        }
-    }
-
-    /// Debounce the registered keys
-    pub async fn debounce(&mut self) {
-        let instant = Instant::now();
-
-        for key in self.reg_keys_local_new.iter_mut() {
-            if instant >= key.time + KEY_DEBOUNCE {
-                #[cfg(feature = "debug")]
-                info!("[debounce] debounced key: {}", key.code as u8);
-                key.state = KeyState::Released;
-            }
         }
     }
 
@@ -139,34 +131,16 @@ impl<'a> Matrix<'a> {
                         let new_key_position = KeyPos {
                             row: row_count as u8,
                             col: col_count as u8,
+                            layer: *LAYER.lock().await,
                         };
 
-                        let registered_key_time = Instant::now();
-
-                        // store the registered key in an the vec
-                        if let Some(contained_key) = self
+                        if let Some(index) = self
                             .reg_keys_local_new
-                            .iter_mut()
-                            .find(|k| k.position == new_key_position)
+                            .iter()
+                            .position(|&key_pos| key_pos == KeyPos::default())
                         {
-                            contained_key.time = Instant::now();
-                            contained_key.state = KeyState::Pressed;
-                        }
-                        // else add it
-                        else {
-                            let _ = self.reg_keys_local_new.push(Key {
-                                code: KC::EU,
-                                position: KeyPos {
-                                    row: row_count as u8,
-                                    col: col_count as u8,
-                                },
-                                time: registered_key_time,
-                                state: KeyState::Pressed,
-                            });
-                        }
-
-                        // store the registered key time
-                        self.reg_key_last_time = registered_key_time;
+                            self.reg_keys_local_new[index] = new_key_position;
+                        };
                     }
                 }
 
@@ -174,28 +148,34 @@ impl<'a> Matrix<'a> {
                 row.set_low();
             }
 
-            // run debounce every 1 ms
+            // send reg_keys every 1 ms
             if Self::is_elapsed(&self.reg_keys_local_written_time, Duration::from_millis(1)) {
-                // run debouncer
-                self.debounce().await;
+                let mut matrix_keys_locked = MATRIX_KEYS.lock().await;
 
-                if self.reg_keys_local_new != self.reg_keys_local_old {
-                    #[cfg(feature = "debug")]
-                    info!("[matrix scan] REGISTERED_KEYS sent");
-                    REGISTERED_KEYS
-                        .sender()
-                        .send(self.reg_keys_local_new.iter().cloned().collect())
-                        .await;
-                }
+                self.reg_keys_local_new.iter().for_each(|l_key| {
+                    if l_key != KeyPos::default() {
+                        if let Some(g_key_index) = matrix_keys_locked
+                            .iter_mut()
+                            .position(|g_key| g_key.position == l_key.position)
+                        {
+                            matrix_keys_locked[g_key_index].time = Instant::now();
+                            matrix_keys_locked[g_key_index].state = KeyState::Pressed;
+                        } else {
+                            let key = Key {
+                                code: KC::EU,
+                                position: *l_key,
+                                time: Instant::now(),
+                                state: KeyState::Pressed,
+                            };
+                            matrix_keys_locked.push(key).expect(
+                                "[matrix_scan] error pushing new key into global matrix_keys",
+                            );
+                        }
 
-                if let Some(position) = self
-                    .reg_keys_local_new
-                    .iter_mut()
-                    .position(|k| k.state == KeyState::Released)
-                {
-                    self.reg_keys_local_new.remove(position);
-                }
-                self.reg_keys_local_old = self.reg_keys_local_new.iter().cloned().collect();
+                        *l_key = KeyPos::default();
+                    }
+                });
+
                 self.reg_keys_local_written_time = Instant::now();
             }
         }
