@@ -10,24 +10,19 @@ pub mod matrix;
 pub mod peripherals;
 pub mod storage;
 
-use embassy_sync::{
-    blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex},
-    channel::Channel,
-    mutex::Mutex,
-};
-use heapless::Vec;
+use crate::{config::MATRIX_KEYS_BUFFER, matrix::KeyPos};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, watch::Watch};
 use usbd_hid::descriptor::KeyboardReport;
 
-pub static KEY_REPORT: Channel<ThreadModeRawMutex, KeyboardReport, 2> = Channel::new();
+/// Shared variable between ble and key provision tasks
+pub static KEY_REPORT: Watch<CriticalSectionRawMutex, KeyboardReport, 2> = Watch::new();
 
-pub static MATRIX_KEYS: Mutex<NoopRawMutex, Vec<Key, { MATRIX_KEYS_BUFFER }>> =
-    Mutex::new(Vec::new());
-
-pub static LAYER: Mutex<NoopRawMutex, u8> = Mutex::new(0);
+/// Shared variable between matrix scan and key provision tasks
+pub static MATRIX_KEYS: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEYS_BUFFER], 1> =
+    Watch::new();
 
 use embassy_time::{Duration, Timer};
 
-use crate::{config::MATRIX_KEYS_BUFFER, matrix::Key};
 pub async fn delay_ms(delay: u64) {
     let duration = Duration::from_millis(delay);
     Timer::after(duration).await;

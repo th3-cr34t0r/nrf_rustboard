@@ -2,7 +2,6 @@ use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::select::select3;
 
-use embassy_nrf::pac::FICR;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::Error;
 use nrf_sdc::SoftdeviceController;
@@ -291,10 +290,14 @@ async fn keyboard_service_task<'stack, 'server>(
 ) {
     let mut buff = [0u8; 8];
 
-    let key_report = KEY_REPORT.receiver();
+    let mut key_report = KEY_REPORT
+        .receiver()
+        .expect(" [ble_peripheral] maximum number of receivers has been reached");
 
     loop {
-        let key_report = key_report.receive().await;
+        // wait till new key_report is received from key_provision
+        let key_report = key_report.changed().await;
+
         let _n = serialize(&mut buff, &key_report).unwrap();
 
         match server.hid_service.input_keyboard.notify(conn, &buff).await {

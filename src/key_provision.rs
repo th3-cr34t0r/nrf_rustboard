@@ -1,29 +1,32 @@
+use embassy_futures::select::{Either, select};
+use embassy_time::Instant;
 use heapless::Vec;
 use usbd_hid::descriptor::KeyboardReport;
 
 use crate::{
-    KEY_REPORT, LAYER, MATRIX_KEYS, MATRIX_KEYS_BUFFER,
-    config::{COLS, LAYERS, ROWS},
+    KEY_REPORT, MATRIX_KEYS, MATRIX_KEYS_BUFFER,
+    config::{COLS, KEY_DEBOUNCE, LAYERS, ROWS},
     delay_ms,
     keycodes::{KC, KeyType},
     keymap::provide_keymap,
-    matrix::{Key, KeyState},
+    matrix::{Key, KeyPos, KeyState},
 };
 
 pub struct KeyProvision {
     layer: u8,
     keymap: [[[KC; COLS * 2]; ROWS]; LAYERS],
-    matrix_keys: Vec<Key, MATRIX_KEYS_BUFFER>,
     keyreport_local: KeyboardReport,
     keyreport_local_old: KeyboardReport,
 }
+
+#[cfg(feature = "debug")]
+use defmt::info;
 
 impl KeyProvision {
     pub fn init() -> Self {
         Self {
             layer: 0,
             keymap: provide_keymap(),
-            matrix_keys: Vec::new(),
             keyreport_local: KeyboardReport::default(),
             keyreport_local_old: KeyboardReport::default(),
         }
@@ -45,7 +48,7 @@ impl KeyProvision {
             // }
             KeyType::Layer => {
                 // check and set the layer
-                *LAYER.lock().await = kc.get_layer();
+                self.layer = kc.get_layer();
             }
             KeyType::Modifier => {
                 self.keyreport_local.modifier |= kc.get_modifier();
@@ -92,7 +95,7 @@ impl KeyProvision {
             //     }
             KeyType::Layer => {
                 // set previous layer
-                *LAYER.lock().await -= 1;
+                self.layer -= 1;
             }
             KeyType::Modifier => {
                 // remove the modifier
@@ -117,95 +120,128 @@ impl KeyProvision {
             _ => {}
         }
     }
-    // /// Debounce the registered keys
-    // pub async fn debounce(&mut self) {
-    //     let instant = Instant::now();
 
-    //     for key in reg_keys_local_new.iter_mut() {
-    //         if instant >= key.time + KEY_DEBOUNCE {
-    //             #[cfg(feature = "debug")]
-    //             info!("[debounce] debounced key: {}", key.code as u8);
-    //             key.state = KeyState::Released;
-    //         }
-    //     }
-    // }
+    /// Debounce the registered keys
+    async fn debounce(&self, matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>) {
+        let instant = Instant::now();
 
-    /// Provision the keys in case of modifiers, combos, macros etc.
-    pub async fn run(&mut self) {
-        let key_report_sender = KEY_REPORT.sender();
+        for key in matrix_keys_local.iter_mut() {
+            if instant >= key.time + KEY_DEBOUNCE {
+                #[cfg(feature = "debug")]
+                info!("[debounce] debounced key: {}", key.code as u8);
+                key.state = KeyState::Released;
+            }
+        }
+    }
 
-        let mut keys_to_remove: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
+    async fn matrix_to_hid(
+        &self,
+        matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>,
+        matrix_keys_received: &[KeyPos; MATRIX_KEYS_BUFFER],
+    ) {
+        for key_pos in matrix_keys_received.iter() {
+            if *key_pos != KeyPos::default() {
+                #[cfg(feature = "debug")]
+                info!(
+                    "[matrix_to_hid] matrix_keys_received: r{} c{}",
+                    key_pos.row, key_pos.col
+                );
 
-        loop {
-            // if matrix keys has an element, provision it
-            let matrix_keys_locked = MATRIX_KEYS.lock().await;
-            if !matrix_keys_locked.is_empty() {
-                for key in matrix_keys_locked.iter_mut() {
-                    match key.state {
-                        KeyState::Pressed => {
-                            #[cfg(feature = "debug")]
-                            info!(
-                                "[key_provision] key.position: col[{}] row[{}] layer[{}]",
-                                key.position.col, key.position.row, key.position.layer
-                            );
+                let time = Instant::now();
 
-                            // get the keycode
-                            key.code = self.keymap[self.layer as usize][key.position.row as usize]
-                                [key.position.col as usize];
-
-                            self.provision_pressed_keys(&key.code).await;
-                        }
-                        KeyState::Released => {
-                            #[cfg(feature = "debug")]
-                            info!("[key_provision] key released: {}", key.code as u8);
-
-                            // get the keycode
-                            key.code = self.keymap[self.layer as usize][key.position.row as usize]
-                                [key.position.col as usize];
-
-                            // remove the kc from keyreport_local
-                            self.provision_released_keys(&key.code).await;
-
-                            // remember the key to be removed
-                            keys_to_remove
-                                .push(*key)
-                                .expect("[matrix] keys_to_remove is full");
-                        }
-                    }
+                if let Some(contained_key) = matrix_keys_local
+                    .iter_mut()
+                    .find(|key| key.position == *key_pos)
+                {
+                    contained_key.time = time;
+                    contained_key.state = KeyState::Pressed;
+                } else {
+                    let key = Key {
+                        code: self.keymap[self.layer as usize][key_pos.row as usize]
+                            [key_pos.col as usize],
+                        position: *key_pos,
+                        time: time,
+                        state: KeyState::Pressed,
+                    };
+                    matrix_keys_local.push(key).unwrap();
                 }
 
-                while let Some(key) = keys_to_remove.pop() {
-                    #[cfg(feature = "debug")]
-                    info!("[key_provision] keys_to_remove key: {}", key.code as u8);
-                    if let Some(position) = matrix_keys_locked
-                        .iter()
-                        .position(|k| k.position == key.position)
-                    {
-                        matrix_keys_locked.remove(position);
-                    }
-                }
-
-                // send the report only if different from the old one
-                if self.keyreport_local != self.keyreport_local_old {
-                    // send report
-                    key_report_sender.send(self.keyreport_local).await;
-
-                    self.keyreport_local_old = self.keyreport_local;
-                }
-
-                // debounce
-                let instant = Instant::now();
-
-                for key in matrix_keys_locked.iter_mut() {
-                    if instant >= key.time + KEY_DEBOUNCE {
-                        #[cfg(feature = "debug")]
-                        info!("[debounce] debounced key: {}", key.code as u8);
-                        key.state = KeyState::Released;
+                #[cfg(feature = "debug")]
+                {
+                    for key in matrix_keys_local.iter() {
+                        info!(
+                            "[matrix_to_hid] matrix_keys_local: r{} c{}",
+                            key.position.row, key.position.col
+                        );
                     }
                 }
             }
         }
+    }
+    /// Provision the keys in case of modifiers, combos, macros etc.
+    pub async fn run(&mut self) {
+        let mut matrix_keys_receiver = MATRIX_KEYS.receiver().expect("[key_provision]");
+        let key_report_sender = KEY_REPORT.sender();
 
-        delay_ms(1).await;
+        let mut matrix_keys_local: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
+        let mut keys_to_remove: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
+
+        loop {
+            match select(matrix_keys_receiver.changed(), delay_ms(5)).await {
+                Either::First(matrix_keys_received) => {
+                    // transform the received matrix keys
+                    self.matrix_to_hid(&mut matrix_keys_local, &matrix_keys_received)
+                        .await;
+                }
+                Either::Second(_) => {} // continue with the provisioning
+            }
+
+            // process the keys to keyreport
+            for key in matrix_keys_local.iter_mut() {
+                match key.state {
+                    KeyState::Pressed => {
+                        // get the keycode
+                        self.provision_pressed_keys(&key.code).await;
+                    }
+                    KeyState::Released => {
+                        // remove the kc from keyreport_local
+                        self.provision_released_keys(&key.code).await;
+
+                        // remember the key to be removed
+                        keys_to_remove
+                            .push(*key)
+                            .expect("[matrix] keys_to_remove is full");
+                    }
+                }
+            }
+
+            // remove the released keys
+            while let Some(key) = keys_to_remove.pop() {
+                #[cfg(feature = "debug")]
+                info!("[key_provision] keys_to_remove key: {}", key.code as u8);
+                if let Some(position) = matrix_keys_local
+                    .iter()
+                    .position(|k| k.position == key.position)
+                {
+                    matrix_keys_local.remove(position);
+                }
+            }
+
+            // send the report only if different from the old one
+            if self.keyreport_local != self.keyreport_local_old {
+                // send report
+                key_report_sender.send(self.keyreport_local);
+                #[cfg(feature = "debug")]
+                info!(
+                    "[key_provision] keyreport_local.keycodes: {:?}",
+                    self.keyreport_local.keycodes
+                );
+
+                self.keyreport_local_old = self.keyreport_local;
+            }
+
+            // debounce
+            self.debounce(&mut matrix_keys_local).await;
+        }
     }
 }
