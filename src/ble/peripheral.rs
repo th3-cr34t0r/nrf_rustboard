@@ -19,9 +19,11 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
 
+use crate::MATRIX_KEYS;
 use crate::ble::get_device_address;
 use crate::ble::host_task;
 use crate::config::BLE_NAME;
+use crate::config::COLS;
 use crate::config::SPLIT_PERIPHERAL;
 use crate::matrix::KeyPos;
 use crate::storage::{load_bonding_info, store_bonding_info};
@@ -222,17 +224,31 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
                     }
                     GattEvent::Write(event) => {
                         if event.handle() == split_service_registered_keys.handle {
-                            // TODO: store them in the global variable
-                            // message comes in [u8;6] array
-                            // let central_data = event.data();
-                            // let mut central_arr = [KeyPos::default(); 6];
+                            let central_data = event.data();
 
-                            // for (index, combined_key) in central_data.iter().enumerate() {
-                            //     let col = combined_key & 0x0f;
-                            //     let row = combined_key >> 4;
+                            let mut matrix_keys_receiver = MATRIX_KEYS
+                                .receiver()
+                                .expect("[key_provision] unable to create matrix_key_receiver");
 
-                            //     central_arr[index] = KeyPos { row, col };
-                            // }
+                            let matrix_keys_sender = MATRIX_KEYS.sender();
+
+                            let mut matrix_keys = matrix_keys_receiver.get().await;
+
+                            for combined_key in central_data.iter() {
+                                if *combined_key != 0u8 {
+                                    for key_pos in matrix_keys.iter_mut() {
+                                        if *key_pos == KeyPos::default() {
+                                            let col = (combined_key & 0x0f) + COLS as u8 + 1;
+                                            let row = combined_key >> 4;
+
+                                            *key_pos = KeyPos { row, col };
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            // send the new matrix_keys
+                            matrix_keys_sender.send(matrix_keys);
                         } else if event.handle() == hid_service_report_map.handle {
                             info!(
                                 "[gatt] Write Event to HID Characteristic {:?}",
