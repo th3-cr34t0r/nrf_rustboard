@@ -17,6 +17,9 @@ use usbd_hid::descriptor::KeyboardReport;
 /// Shared variable between ble and key provision tasks
 pub static KEY_REPORT: Watch<CriticalSectionRawMutex, KeyboardReport, 2> = Watch::new();
 
+/// Shared variable between ble and key provision tasks
+pub static MESSAGE_TO_PERI: Watch<CriticalSectionRawMutex, [u8; 6], 2> = Watch::new();
+
 /// Shared variable between matrix scan and key provision tasks
 pub static MATRIX_KEYS: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEYS_BUFFER], 1> =
     Watch::new();

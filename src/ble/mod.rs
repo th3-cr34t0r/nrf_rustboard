@@ -20,7 +20,7 @@ use nrf_sdc::{
 use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
 use static_cell::StaticCell;
-use trouble_host::prelude::DefaultPacketPool;
+use trouble_host::prelude::{DefaultPacketPool, Runner};
 use trouble_host::{Address, HostResources};
 
 use crate::config::SPLIT_PERIPHERAL;
@@ -41,10 +41,6 @@ bind_interrupts!(struct Irqs {
     QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
 });
 
-const CONNECTIONS_MAX: usize = SPLIT_PERIPHERAL as usize + 1;
-
-const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
-
 /// How many outgoing L2CAP buffers per link
 const L2CAP_TXQ: u8 = 3;
 
@@ -57,7 +53,10 @@ const L2CAP_MTU: usize = 72;
 /// Default memory allocation for softdevice controller in bytes.
 const SDC_MEMORY_SIZE: usize = 1744; // bytes
 
-type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
+#[embassy_executor::task]
+async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
+    runner.run().await.expect("Host task failed to run");
+}
 
 const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
     source: MPSL_CLOCK_LF_SRC_RC as u8,
@@ -141,7 +140,7 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem).expect("[ble] Error building SDC");
 
     #[cfg(feature = "central")]
-    crate::ble::central::ble_central_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
+    crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng, spawner).await;
     #[cfg(feature = "peripheral")]
     crate::ble::peripheral::ble_peripheral_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
 }

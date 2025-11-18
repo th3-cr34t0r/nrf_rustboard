@@ -8,10 +8,10 @@ use nrf_sdc::SoftdeviceController;
 use nrf_sdc::mpsl::MultiprotocolServiceLayer;
 use rand::{CryptoRng, RngCore};
 use static_cell::StaticCell;
+use trouble_host::HostResources;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
-use trouble_host::prelude::Runner;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
     AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
@@ -19,9 +19,11 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
 
-use crate::ble::BleHostResources;
 use crate::ble::get_device_address;
+use crate::ble::host_task;
 use crate::config::BLE_NAME;
+use crate::config::SPLIT_PERIPHERAL;
+use crate::matrix::KeyPos;
 use crate::storage::{load_bonding_info, store_bonding_info};
 
 use ssmarshal::{self, serialize};
@@ -29,14 +31,15 @@ use ssmarshal::{self, serialize};
 use crate::ble::services::Server;
 use crate::{KEY_REPORT, delay_ms};
 
+const CONNECTIONS_MAX: usize = SPLIT_PERIPHERAL as usize + 1;
+
+const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
+
+type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
+
 #[embassy_executor::task]
 async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
     mpsl.run().await;
-}
-
-#[embassy_executor::task]
-async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
-    runner.run().await.expect("Host task failed to run");
 }
 
 /// run ble
@@ -172,8 +175,9 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
     storage: &mut S,
     bond_stored: &mut bool,
 ) -> Result<(), Error> {
-    let hid_service = server.hid_service.report_map;
-    let battery_service = server.battery_service.level;
+    let hid_service_report_map = server.hid_service.report_map;
+    let battery_service_level = server.battery_service.level;
+    let split_service_registered_keys = server.split_service.registered_keys;
 
     let reason = loop {
         match conn.next().await {
@@ -197,11 +201,11 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
             GattConnectionEvent::Gatt { event } => {
                 match &event {
                     GattEvent::Read(event) => {
-                        if event.handle() == hid_service.handle {
-                            let value = server.get(&hid_service);
+                        if event.handle() == hid_service_report_map.handle {
+                            let value = server.get(&hid_service_report_map);
                             info!("[gatt] Read Event to HID Characteristic: {:?}", value);
-                        } else if event.handle() == battery_service.handle {
-                            let value = server.get(&battery_service);
+                        } else if event.handle() == battery_service_level.handle {
+                            let value = server.get(&battery_service_level);
                             info!("[gatt] Read Event to Level Characteristic: {:?}", value);
                         }
 
@@ -217,12 +221,24 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
                         }
                     }
                     GattEvent::Write(event) => {
-                        if event.handle() == hid_service.handle {
+                        if event.handle() == split_service_registered_keys.handle {
+                            // TODO: store them in the global variable
+                            // message comes in [u8;6] array
+                            // let central_data = event.data();
+                            // let mut central_arr = [KeyPos::default(); 6];
+
+                            // for (index, combined_key) in central_data.iter().enumerate() {
+                            //     let col = combined_key & 0x0f;
+                            //     let row = combined_key >> 4;
+
+                            //     central_arr[index] = KeyPos { row, col };
+                            // }
+                        } else if event.handle() == hid_service_report_map.handle {
                             info!(
                                 "[gatt] Write Event to HID Characteristic {:?}",
                                 event.data()
                             );
-                        } else if event.handle() == battery_service.handle {
+                        } else if event.handle() == battery_service_level.handle {
                             info!(
                                 "[gatt] Write Event to Level Characteristic {:?}",
                                 event.data()

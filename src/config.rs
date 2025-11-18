@@ -9,6 +9,8 @@ pub const LAYERS: usize = 2;
 /// Name your keyboard
 pub const BLE_NAME: &str = "Rustboard";
 
+pub const PERI_ADDRESS: [u8; 6] = [0xff; 6];
+
 /// Specify if the keyboard is split
 pub const SPLIT_PERIPHERAL: bool = true;
 

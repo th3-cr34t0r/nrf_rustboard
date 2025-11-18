@@ -4,7 +4,7 @@ use heapless::Vec;
 use usbd_hid::descriptor::KeyboardReport;
 
 use crate::{
-    KEY_REPORT, MATRIX_KEYS, MATRIX_KEYS_BUFFER,
+    KEY_REPORT, MATRIX_KEYS, MATRIX_KEYS_BUFFER, MESSAGE_TO_PERI,
     config::{COLS, KEY_DEBOUNCE, LAYERS, ROWS},
     delay_ms,
     keycodes::{KC, KeyType},
@@ -13,10 +13,18 @@ use crate::{
 };
 
 pub struct KeyProvision {
+    #[cfg(feature = "peripheral")]
     layer: u8,
+    #[cfg(feature = "peripheral")]
     keymap: [[[KC; COLS * 2]; ROWS]; LAYERS],
+    #[cfg(feature = "peripheral")]
     keyreport_local: KeyboardReport,
+    #[cfg(feature = "peripheral")]
     keyreport_local_old: KeyboardReport,
+    #[cfg(feature = "central")]
+    message_to_peri_local: [u8; 6],
+    #[cfg(feature = "central")]
+    message_to_peri_local_old: [u8; 6],
 }
 
 #[cfg(feature = "debug")]
@@ -25,12 +33,22 @@ use defmt::info;
 impl KeyProvision {
     pub fn init() -> Self {
         Self {
+            #[cfg(feature = "peripheral")]
             layer: 0,
+            #[cfg(feature = "peripheral")]
             keymap: provide_keymap(),
+            #[cfg(feature = "peripheral")]
             keyreport_local: KeyboardReport::default(),
+            #[cfg(feature = "peripheral")]
             keyreport_local_old: KeyboardReport::default(),
+
+            #[cfg(feature = "central")]
+            message_to_peri_local: [0; 6],
+            #[cfg(feature = "central")]
+            message_to_peri_local_old: [0; 6],
         }
     }
+    #[cfg(feature = "peripheral")]
     pub async fn provision_pressed_keys(&mut self, kc: &KC) {
         // get the key type
         match KeyType::check_type(kc) {
@@ -77,6 +95,7 @@ impl KeyProvision {
         }
     }
 
+    #[cfg(feature = "peripheral")]
     async fn provision_released_keys(&mut self, kc: &KC) {
         // get the key type
         match KeyType::check_type(kc) {
@@ -157,8 +176,12 @@ impl KeyProvision {
                     contained_key.state = KeyState::Pressed;
                 } else {
                     let key = Key {
+                        #[cfg(feature = "peripheral")]
                         code: self.keymap[self.layer as usize][key_pos.row as usize]
                             [key_pos.col as usize],
+
+                        #[cfg(feature = "central")]
+                        code: KC::EU,
                         position: *key_pos,
                         time: time,
                         state: KeyState::Pressed,
@@ -180,8 +203,14 @@ impl KeyProvision {
     }
     /// Provision the keys in case of modifiers, combos, macros etc.
     pub async fn run(&mut self) {
-        let mut matrix_keys_receiver = MATRIX_KEYS.receiver().expect("[key_provision]");
+        let mut matrix_keys_receiver = MATRIX_KEYS
+            .receiver()
+            .expect("[key_provision] unable to create matrix_key_receiver");
+
+        #[cfg(feature = "peripheral")]
         let key_report_sender = KEY_REPORT.sender();
+        #[cfg(feature = "central")]
+        let message_to_peri = MESSAGE_TO_PERI.sender();
 
         let mut matrix_keys_local: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
         let mut keys_to_remove: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
@@ -200,12 +229,48 @@ impl KeyProvision {
             for key in matrix_keys_local.iter_mut() {
                 match key.state {
                     KeyState::Pressed => {
+                        #[cfg(feature = "peripheral")]
                         // get the keycode
                         self.provision_pressed_keys(&key.code).await;
+
+                        #[cfg(feature = "central")]
+                        {
+                            // set the row and shift 4 bits to left
+                            // append the col
+                            // row and col must be lower than 16 (fit in 4 bits)
+                            let key_to_send = (key.position.row << 4) | key.position.col;
+
+                            if !self.message_to_peri_local.contains(&key_to_send) {
+                                if let Some(index) = self
+                                    .message_to_peri_local
+                                    .iter_mut()
+                                    .position(|key| *key == 0)
+                                {
+                                    self.message_to_peri_local[index] = key_to_send;
+                                }
+                            }
+                        }
                     }
                     KeyState::Released => {
+                        #[cfg(feature = "peripheral")]
                         // remove the kc from keyreport_local
                         self.provision_released_keys(&key.code).await;
+
+                        #[cfg(feature = "central")]
+                        {
+                            // set the row and shift 4 bits to left
+                            // append the col
+                            // row and col must be lower than 16 (fit in 4 bits)
+                            let key_to_rm = (key.position.row << 4) | key.position.col;
+
+                            if let Some(index) = self
+                                .message_to_peri_local
+                                .iter_mut()
+                                .position(|key| *key == key_to_rm)
+                            {
+                                self.message_to_peri_local[index] = 0;
+                            }
+                        }
 
                         // remember the key to be removed
                         keys_to_remove
@@ -227,6 +292,7 @@ impl KeyProvision {
                 }
             }
 
+            #[cfg(feature = "peripheral")]
             // send the report only if different from the old one
             if self.keyreport_local != self.keyreport_local_old {
                 // send report
@@ -240,6 +306,18 @@ impl KeyProvision {
                 self.keyreport_local_old = self.keyreport_local;
             }
 
+            #[cfg(feature = "central")]
+            {
+                if self.message_to_peri_local != self.message_to_peri_local_old {
+                    message_to_peri.send(self.message_to_peri_local);
+                    #[cfg(feature = "debug")]
+                    info!(
+                        "[key_provision] message_to_peri_local: {:?}",
+                        self.message_to_peri_local
+                    );
+                    self.message_to_peri_local_old = self.message_to_peri_local;
+                }
+            }
             // debounce
             self.debounce(&mut matrix_keys_local).await;
         }
