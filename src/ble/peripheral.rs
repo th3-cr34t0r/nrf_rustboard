@@ -181,6 +181,12 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
     let battery_service_level = server.battery_service.level;
     let split_service_registered_keys = server.split_service.registered_keys;
 
+    let mut matrix_keys_receiver = MATRIX_KEYS
+        .receiver()
+        .expect("[key_provision] unable to create matrix_key_receiver");
+
+    let matrix_keys_sender = MATRIX_KEYS.sender();
+
     let reason = loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => break reason,
@@ -224,26 +230,23 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
                     }
                     GattEvent::Write(event) => {
                         if event.handle() == split_service_registered_keys.handle {
+                            // central message to peripheral
                             let central_data = event.data();
 
-                            let mut matrix_keys_receiver = MATRIX_KEYS
-                                .receiver()
-                                .expect("[key_provision] unable to create matrix_key_receiver");
-
-                            let matrix_keys_sender = MATRIX_KEYS.sender();
-
+                            // get the matrix keys
                             let mut matrix_keys = matrix_keys_receiver.get().await;
 
+                            // store the central keys in matrix keys
                             for combined_key in central_data.iter() {
-                                if *combined_key != 0u8 {
-                                    for key_pos in matrix_keys.iter_mut() {
-                                        if *key_pos == KeyPos::default() {
-                                            let col = (combined_key & 0x0f) + COLS as u8 + 1;
-                                            let row = combined_key >> 4;
+                                if *combined_key != 255u8 {
+                                    if let Some(index) = matrix_keys
+                                        .iter_mut()
+                                        .position(|m_key| *m_key == KeyPos::default())
+                                    {
+                                        let col = (combined_key & 0x0f) + COLS as u8 + 1;
+                                        let row = combined_key >> 4;
 
-                                            *key_pos = KeyPos { row, col };
-                                            break;
-                                        }
+                                        matrix_keys[index] = KeyPos { row, col };
                                     }
                                 }
                             }

@@ -43,9 +43,9 @@ impl KeyProvision {
             keyreport_local_old: KeyboardReport::default(),
 
             #[cfg(feature = "central")]
-            message_to_peri_local: [0; 6],
+            message_to_peri_local: [255; 6],
             #[cfg(feature = "central")]
-            message_to_peri_local_old: [0; 6],
+            message_to_peri_local_old: [255; 6],
         }
     }
     #[cfg(feature = "peripheral")]
@@ -244,7 +244,7 @@ impl KeyProvision {
                                 if let Some(index) = self
                                     .message_to_peri_local
                                     .iter_mut()
-                                    .position(|key| *key == 0)
+                                    .position(|key| *key == 255)
                                 {
                                     self.message_to_peri_local[index] = key_to_send;
                                 }
@@ -268,7 +268,7 @@ impl KeyProvision {
                                 .iter_mut()
                                 .position(|key| *key == key_to_rm)
                             {
-                                self.message_to_peri_local[index] = 0;
+                                self.message_to_peri_local[index] = 255;
                             }
                         }
 
