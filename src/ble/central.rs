@@ -4,6 +4,7 @@
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
+use embassy_time::with_timeout;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::{Error, SoftdeviceController};
 use rand::{CryptoRng, RngCore};
@@ -20,6 +21,7 @@ use crate::{
     MESSAGE_TO_PERI,
     ble::{get_device_address, host_task},
     config::PERI_ADDRESS,
+    delay_ms,
 };
 
 const CONNECTIONS_MAX: usize = 1;
@@ -105,13 +107,19 @@ async fn connect<'a, 'b>(
         },
         connect_params: Default::default(),
     };
-
-    let conn = central
-        .connect(&config)
-        .await
-        .expect("[ble_central] error connecting to target");
-
-    Ok(conn)
+    // Connect to peripheral
+    match with_timeout(Duration::from_secs(5), async {
+        info!("Start connecting to peripheral {}", peri_id);
+        central.connect(&config).await
+    })
+    .await
+    {
+        Ok(conn) => conn,
+        Err(_) => {
+            // if not connected, try again
+            delay_ms(100).await;
+        }
+    }
 }
 
 async fn split_keyboard_task<'a>(
