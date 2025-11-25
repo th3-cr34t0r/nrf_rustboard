@@ -1,5 +1,6 @@
 use defmt::{error, info};
 use embassy_executor::Spawner;
+use embassy_futures::select::select;
 use embassy_futures::select::select3;
 
 use embedded_storage_async::nor_flash::NorFlash;
@@ -22,6 +23,7 @@ use trouble_host::{Address, BleHostError, Host, Stack};
 use crate::MATRIX_KEYS;
 use crate::ble::get_device_address;
 use crate::ble::host_task;
+use crate::ble::services::SPLIT_SERVICE;
 use crate::config::BLE_NAME;
 use crate::config::COLS;
 use crate::config::SPLIT_PERIPHERAL;
@@ -104,8 +106,8 @@ pub async fn ble_peripheral_run<RNG, S>(
     spawner.must_spawn(host_task(runner));
 
     // advertiser
-    loop {
-        match advertise(&mut peripheral, &server).await {
+    let adv_hid_task = async {
+        match advertise_hid(&mut peripheral, &server).await {
             Ok(conn) => {
                 // set bondable
                 conn.raw()
@@ -126,10 +128,41 @@ pub async fn ble_peripheral_run<RNG, S>(
                 error!("{}", e);
             }
         }
+    };
+
+    let adv_split_task = async {
+        match advertise_hid(&mut peripheral, &server).await {
+            Ok(conn) => {
+                // set bondable
+                // conn.raw()
+                //     .set_bondable(!bond_stored)
+                //     .expect("[ble] error setting bondable");
+
+                // info!("[adv] bond_stored: {}", bond_stored);
+                info!("[adv] Split Connected! Running service tasks");
+
+                // run gatt events task handler
+                gatt_events_handler(&conn, &server, &mut storage, &mut bond_stored).await;
+            }
+            Err(e) => {
+                error!("{}", e);
+            }
+        }
+    };
+    // in case of disconnect, wait for connection
+    loop {
+        match select(adv_hid_task, adv_split_task).await {
+            embassy_futures::select::Either::First(_) => {
+                info!("[ble] hid device disconnected");
+            }
+            embassy_futures::select::Either::Second(_) => {
+                info!("[ble] split device disconnected");
+            }
+        };
     }
 }
 
-async fn advertise<'a, 'b>(
+async fn advertise_hid<'a, 'b>(
     peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
     server: &'b Server<'_>,
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
@@ -167,6 +200,39 @@ async fn advertise<'a, 'b>(
     let conn = advertiser.accept().await?.with_attribute_server(server)?;
 
     info!("[adv] Connection established");
+
+    Ok(conn)
+}
+async fn advertise_split<'a, 'b>(
+    peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
+    server: &'b Server<'_>,
+) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
+    let mut advertiser_data = [0; 31];
+
+    AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::ServiceUuids16(&[SPLIT_SERVICE.to_le_bytes()]),
+            AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
+        ],
+        &mut advertiser_data[..],
+    )?;
+
+    let advertiser = peripheral
+        .advertise(
+            &Default::default(),
+            Advertisement::ConnectableScannableUndirected {
+                adv_data: &advertiser_data[..],
+                scan_data: &[],
+            },
+        )
+        .await?;
+
+    info!("[adv] Advertising Split; waiting for split connection...");
+
+    let conn = advertiser.accept().await?.with_attribute_server(server)?;
+
+    info!("[adv] Split connection established");
 
     Ok(conn)
 }
