@@ -54,8 +54,8 @@ const L2CAP_MTU: usize = 72;
 const SDC_MEMORY_SIZE: usize = 1744; // bytes
 
 #[embassy_executor::task]
-async fn host_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
-    runner.run().await.expect("Host task failed to run");
+async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
+    mpsl.run().await;
 }
 
 const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
@@ -138,6 +138,9 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     let mut rng = ChaCha12Rng::from_rng(&mut sdc_rng).unwrap();
 
     let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem).expect("[ble] Error building SDC");
+
+    // run the mpsl task
+    spawner.must_spawn(mpsl_task(&mpsl));
 
     #[cfg(feature = "central")]
     crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng, spawner).await;
