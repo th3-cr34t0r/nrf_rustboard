@@ -4,6 +4,7 @@ use embassy_futures::join::join;
 use embassy_futures::select::select;
 use embassy_futures::select::select3;
 
+use embassy_futures::select::select4;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::Error;
 use nrf_sdc::SoftdeviceController;
@@ -14,6 +15,7 @@ use trouble_host::HostResources;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
+use trouble_host::prelude::ConnectionEvent;
 use trouble_host::prelude::Runner;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
@@ -23,8 +25,9 @@ use trouble_host::prelude::{
 use trouble_host::{Address, BleHostError, Host, Stack};
 
 use crate::MATRIX_KEYS;
+use crate::ble::ble_task;
 use crate::ble::get_device_address;
-use crate::ble::host_task;
+use crate::ble::services::BleHidServer;
 use crate::ble::services::SPLIT_SERVICE;
 use crate::config::BLE_NAME;
 use crate::config::COLS;
@@ -37,9 +40,9 @@ use ssmarshal::{self, serialize};
 use crate::ble::services::Server;
 use crate::{KEY_REPORT, delay_ms};
 
-const CONNECTIONS_MAX: usize = SPLIT_PERIPHERAL as usize + 1;
+const CONNECTIONS_MAX: usize = 2;
 
-const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
+const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX * 4;
 
 type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
 
@@ -62,7 +65,6 @@ pub async fn ble_peripheral_run<RNG, S>(
         static RESOURCES: StaticCell<BleHostResources> = StaticCell::new();
         RESOURCES.init(BleHostResources::new())
     };
-
     let stack = {
         static STACK: StaticCell<Stack<'_, SoftdeviceController<'_>, DefaultPacketPool>> =
             StaticCell::new();
@@ -75,7 +77,7 @@ pub async fn ble_peripheral_run<RNG, S>(
 
     // get the bond information
     let mut bond_stored = if let Some(bond_info) = load_bonding_info(storage).await {
-        stack.add_bond_information(bond_info).unwrap();
+        // stack.add_bond_information(bond_info).unwrap();
         info!("[ble] loaded bond information");
         true
     } else {
@@ -96,45 +98,53 @@ pub async fn ble_peripheral_run<RNG, S>(
     }))
     .expect("Failed to create GATT Server");
 
+    info!("[ble] server initialized");
+
     let _ = join(
         // backgroun task
         ble_task(runner),
         // advertiser
         async {
-            match advertise(&mut peripheral, &server).await {
-                Ok(conn) => {
-                    // set bondable
-                    conn.raw()
-                        .set_bondable(!bond_stored)
-                        .expect("[ble] error setting bondable");
+            loop {
+                match advertise(&mut peripheral, &server).await {
+                    Ok(conn_1) => {
+                        // set bondable
+                        // conn.raw()
+                        //     .set_bondable(!bond_stored)
+                        //     .expect("[ble] error setting bondable");
 
-                    info!("[adv] bond_stored: {}", bond_stored);
-                    info!("[adv] Connected! Running service tasks");
+                        // info!("[adv] bond_stored: {}", bond_stored);
+                        info!("[adv] Connected! Running service tasks");
 
-                    let _ = select3(
-                        gatt_events_handler(&conn, &server, &mut storage, &mut bond_stored),
-                        battery_service_task(&conn, &server),
-                        keyboard_service_task(&conn, &server),
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    error!("{}", e);
+                        let _ = join(gatt_events_handler(&conn_1, &server), async {
+                            loop {
+                                // advertise to connect second central
+                                match advertise(&mut peripheral, &server).await {
+                                    Ok(conn_2) => {
+                                        let _ = select3(
+                                            gatt_events_handler(&conn_2, &server),
+                                            battery_service_task(&conn_2, &server),
+                                            keyboard_service_task(&conn_2, &server),
+                                        )
+                                        .await;
+                                    }
+                                    Err(e) => {
+                                        error!("{}", e);
+                                        delay_ms(100).await;
+                                    }
+                                }
+                            }
+                        })
+                        .await;
+                    }
+                    Err(e) => {
+                        error!("{}", e);
+                    }
                 }
             }
         },
-    );
-}
-
-/// Background ble task
-async fn ble_task(mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>) {
-    loop {
-        if let Err(e) = runner.run().await {
-            #[cfg(feature = "defmt")]
-            let e = defmt::Debug2Format(&e);
-            panic!("[ble_task] error: {:?}", e);
-        }
-    }
+    )
+    .await;
 }
 
 /// Advertiser task
@@ -150,6 +160,7 @@ async fn advertise<'a, 'b>(
             AdStructure::ServiceUuids16(&[
                 BATTERY.to_le_bytes(),
                 HUMAN_INTERFACE_DEVICE.to_le_bytes(),
+                SPLIT_SERVICE.to_le_bytes(),
             ]),
             AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
             AdStructure::Unknown {
@@ -171,21 +182,23 @@ async fn advertise<'a, 'b>(
         )
         .await?;
 
-    info!("[adv] Advertising; waiting for connection...");
-
+    info!("[adv] advertising, waiting for connection...");
     let conn = advertiser.accept().await?.with_attribute_server(server)?;
 
-    info!("[adv] Connection established");
-
+    info!("[adv] connection established");
     Ok(conn)
 }
 
 /// Gatt event handelr task
-async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
+async fn gatt_events_handler<
+    'stack,
+    'server,
+    // S: NorFlash
+>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
-    storage: &mut S,
-    bond_stored: &mut bool,
+    // storage: &mut S,
+    // bond_stored: &mut bool,
 ) -> Result<(), Error> {
     let hid_service_report_map = server.hid_service.report_map;
     let battery_service_level = server.battery_service.level;
@@ -206,10 +219,10 @@ async fn gatt_events_handler<'stack, 'server, S: NorFlash>(
             } => {
                 info!("[gatt] pairing complete: {:?}", security_level);
                 if let Some(bond) = bond {
-                    store_bonding_info(storage, &bond)
-                        .await
-                        .expect("[gatt] error storing bond info");
-                    *bond_stored = true;
+                    // store_bonding_info(storage, &bond)
+                    //     .await
+                    //     .expect("[gatt] error storing bond info");
+                    // *bond_stored = true;
                     info!("[gatt] bond information stored");
                 }
             }

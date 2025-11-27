@@ -21,7 +21,7 @@ pub static KEY_REPORT: Watch<CriticalSectionRawMutex, KeyboardReport, 2> = Watch
 pub static MESSAGE_TO_PERI: Watch<CriticalSectionRawMutex, [u8; 6], 2> = Watch::new();
 
 /// Shared variable between matrix scan and key provision tasks
-pub static MATRIX_KEYS: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEYS_BUFFER], 1> =
+pub static MATRIX_KEYS: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEYS_BUFFER], 3> =
     Watch::new();
 
 use embassy_time::{Duration, Timer};

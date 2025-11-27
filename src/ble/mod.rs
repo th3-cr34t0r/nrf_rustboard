@@ -1,3 +1,4 @@
+use defmt::info;
 use embassy_executor::Spawner;
 use embassy_nrf::mode::Async;
 
@@ -27,7 +28,9 @@ use crate::config::SPLIT_PERIPHERAL;
 
 use crate::peripherals::BlePeri;
 
+// #[cfg(feature = "central")]
 mod central;
+// #[cfg(feature = "peripheral")]
 mod peripheral;
 mod services;
 
@@ -51,11 +54,25 @@ const L2CAP_RXQ: u8 = 3;
 const L2CAP_MTU: usize = 72;
 
 /// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 1744; // bytes
+const SDC_MEMORY_SIZE: usize = 2936; // bytes
 
 #[embassy_executor::task]
 async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
     mpsl.run().await;
+}
+
+/// Background ble task
+pub async fn ble_task(
+    mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>,
+) {
+    info!("[ble_task] running runner");
+    loop {
+        if let Err(e) = runner.run().await {
+            #[cfg(feature = "defmt")]
+            let e = defmt::Debug2Format(&e);
+            panic!("[ble_task] error: {:?}", e);
+        }
+    }
 }
 
 const LFCLK_CFG: mpsl_clock_lfclk_cfg_t = mpsl_clock_lfclk_cfg_t {
@@ -76,7 +93,7 @@ fn build_sdc<'a, const N: usize>(
     sdc::Builder::new()?
         .support_adv()?
         .support_peripheral()?
-        .peripheral_count(1)?
+        .peripheral_count(2)?
         .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
         .build(p, rng, mpsl, mem)
 }
@@ -140,12 +157,12 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     let sdc = build_sdc(sdc_p, sdc_rng, mpsl, sdc_mem).expect("[ble] Error building SDC");
 
     // run the mpsl task
-    spawner.must_spawn(mpsl_task(&mpsl));
+    spawner.must_spawn(mpsl_task(mpsl));
 
     #[cfg(feature = "central")]
     crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng, spawner).await;
     #[cfg(feature = "peripheral")]
-    crate::ble::peripheral::ble_peripheral_run(sdc, mpsl, &mut storage, &mut rng, spawner).await;
+    crate::ble::peripheral::ble_peripheral_run(sdc, &mut storage, &mut rng, spawner).await;
 }
 
 pub fn get_device_address() -> Address {
