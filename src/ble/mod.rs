@@ -54,7 +54,7 @@ const L2CAP_RXQ: u8 = 3;
 const L2CAP_MTU: usize = 72;
 
 /// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 2936; // bytes
+const SDC_MEMORY_SIZE: usize = 6712; // bytes
 
 #[embassy_executor::task]
 async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
@@ -91,10 +91,12 @@ fn build_sdc<'a, const N: usize>(
     mem: &'a mut sdc::Mem<N>,
 ) -> Result<SoftdeviceController<'a>, nrf_sdc::Error> {
     sdc::Builder::new()?
+        .support_scan()?
+        .support_central()?
         .support_adv()?
         .support_peripheral()?
-        .peripheral_count(1)?
         .central_count(2)?
+        .peripheral_count(1)?
         .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
         .build(p, rng, mpsl, mem)
 }
@@ -167,9 +169,16 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
 }
 
 pub fn get_device_address() -> Address {
-    let addr_0 = FICR.deviceaddr(0).read().to_le_bytes();
-    let addr_1 = FICR.deviceaddr(1).read().to_le_bytes();
-    Address::random([
-        addr_0[0], addr_0[1], addr_0[2], addr_0[3], addr_1[0], addr_1[1],
-    ])
+    let addr_0 = FICR.deviceid(0).read();
+    let addr_1 = FICR.deviceid(1).read();
+
+    let high = u64::from(addr_0);
+    let addr = (high << 32) | u64::from(addr_1);
+    let addr = addr | 0x0000_c000_0000_0000;
+
+    Address::random(
+        addr.to_le_bytes()[..6]
+            .try_into()
+            .expect("[addr] issue getting ble address"),
+    )
 }
