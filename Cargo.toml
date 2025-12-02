@@ -18,7 +18,7 @@ embassy-futures = "0.1.1"
 
 nrf-mpsl = { version = "0.3.0", features = ["defmt", "critical-section-impl"] }
 nrf-sdc = { version = "0.4.0", features = ["peripheral", "central","defmt", "nrf52840",] }
-trouble-host = { version = "0.5.0", features = ["defmt", "scan", "gatt","central", "peripheral", "security"] }
+trouble-host = { version = "0.5.0", features = ["derive", "defmt", "scan", "gatt","central", "peripheral", "security"] }
 
 embedded-storage-async = { version = "0.4.1"}
 sequential-storage = { version = "5.0.0" }

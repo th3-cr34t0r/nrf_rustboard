@@ -15,6 +15,8 @@ use trouble_host::HostResources;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
+use trouble_host::prelude::CCCD;
+use trouble_host::prelude::CccdTable;
 use trouble_host::prelude::ConnectionEvent;
 use trouble_host::prelude::Runner;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
@@ -24,6 +26,7 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
 
+use crate::CCCD_TABLE;
 use crate::MATRIX_KEYS;
 use crate::ble::ble_task;
 use crate::ble::get_device_address;
@@ -98,6 +101,11 @@ pub async fn ble_peripheral_run<RNG, S>(
     }))
     .expect("Failed to create GATT Server");
 
+    // init cccd_table
+    CCCD_TABLE
+        .sender()
+        .send(CccdTable::new([(0u16, 0.into()); 8]));
+
     info!("[ble] server initialized");
 
     let _ = join(
@@ -115,6 +123,7 @@ pub async fn ble_peripheral_run<RNG, S>(
 
                         // info!("[adv] bond_stored: {}", bond_stored);
                         info!("[adv] Connected! Running service tasks");
+                        delay_ms(1000).await;
 
                         let _ = join(gatt_events_handler(&conn_1, &server), async {
                             loop {
@@ -130,7 +139,7 @@ pub async fn ble_peripheral_run<RNG, S>(
                                     }
                                     Err(e) => {
                                         error!("{}", e);
-                                        delay_ms(100).await;
+                                        delay_ms(1000).await;
                                     }
                                 }
                             }
@@ -154,6 +163,7 @@ async fn advertise<'a, 'b>(
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
     let mut advertiser_data = [0; 31];
 
+    info!("[adv] creating adStructure");
     AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
@@ -172,6 +182,7 @@ async fn advertise<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
+    info!("[adv] creating advertiser");
     let advertiser = peripheral
         .advertise(
             &Default::default(),
@@ -183,10 +194,15 @@ async fn advertise<'a, 'b>(
         .await?;
 
     info!("[adv] advertising, waiting for connection...");
-    let conn = advertiser.accept().await?.with_attribute_server(server)?;
+    let raw_conn = advertiser.accept().await?;
+
+    server.set_cccd_table(&raw_conn, CCCD_TABLE.receiver().unwrap().get().await);
+
+    let gatt_conn = raw_conn.with_attribute_server(&server)?;
 
     info!("[adv] connection established");
-    Ok(conn)
+
+    Ok(gatt_conn)
 }
 
 /// Gatt event handelr task

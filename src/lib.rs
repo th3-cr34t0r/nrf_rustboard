@@ -11,7 +11,13 @@ pub mod peripherals;
 pub mod storage;
 
 use crate::{config::MATRIX_KEYS_BUFFER, matrix::KeyPos};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, watch::Watch};
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex},
+    mutex::Mutex,
+    signal::Signal,
+    watch::Watch,
+};
+use trouble_host::prelude::{CCCD, CccdTable};
 use usbd_hid::descriptor::KeyboardReport;
 
 /// Shared variable between ble and key provision tasks
@@ -23,6 +29,8 @@ pub static MESSAGE_TO_PERI: Watch<CriticalSectionRawMutex, [u8; 6], 2> = Watch::
 /// Shared variable between matrix scan and key provision tasks
 pub static MATRIX_KEYS: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEYS_BUFFER], 3> =
     Watch::new();
+
+pub static CCCD_TABLE: Watch<CriticalSectionRawMutex, CccdTable<8>, 3> = Watch::new();
 
 use embassy_time::{Duration, Timer};
 

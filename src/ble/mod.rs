@@ -96,7 +96,7 @@ fn build_sdc<'a, const N: usize>(
         .support_adv()?
         .support_peripheral()?
         .central_count(2)?
-        .peripheral_count(1)?
+        .peripheral_count(2)?
         .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
         .build(p, rng, mpsl, mem)
 }

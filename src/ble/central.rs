@@ -4,6 +4,7 @@
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
+use embassy_time::{Duration, with_timeout};
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::{Error, SoftdeviceController};
 use rand::{CryptoRng, RngCore};
@@ -68,6 +69,8 @@ pub async fn ble_central_run<RNG, S>(
                 Ok(conn) => {
                     // TODO: allow bonding
 
+                    info!("[ble_connect] connected to peripheral");
+
                     // create client
                     let client = {
                         static CLIENT: StaticCell<
@@ -107,16 +110,31 @@ async fn connect<'a, 'b>(
         },
         connect_params: Default::default(),
     };
+
     // Connect to peripheral
-    info!("Start connecting to peripheral {}", target);
+    info!("[ble_connect] connecting to peripheral {}", target);
     loop {
-        match central.connect(&config).await {
-            Ok(conn) => return Ok(conn),
+        match with_timeout(Duration::from_millis(100), central.connect(&config)).await {
+            Ok(Ok(conn)) => {
+                return Ok(conn);
+            }
+            Ok(Err(e)) => {
+                info!("[ble_connect] error connecting: {}", e);
+                delay_ms(100).await;
+            }
             Err(_) => {
                 // if not connected, try again
                 delay_ms(100).await;
             }
         }
+        // match central.connect(&config).await {
+        //     Ok(conn) => return Ok(conn),
+        //     Err(e) => {
+        //         // if not connected, try again
+        //         info!("[ble_connect] not connected: {}", e);
+        //         delay_ms(1000).await;
+        //     }
+        // }
     }
 }
 
@@ -138,6 +156,8 @@ async fn split_keyboard_task<'a>(
     let mut message_to_peri = MESSAGE_TO_PERI
         .receiver()
         .expect(" [ble_peripheral] maximum number of receivers has been reached");
+
+    info!("[ble_split_keyboard_task] running split_keyboard_task");
 
     loop {
         // wait till new key_report is received from key_provision
