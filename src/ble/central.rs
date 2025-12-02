@@ -3,7 +3,10 @@
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
+use embassy_futures::{
+    join::join,
+    select::{self, Either, select},
+};
 use embassy_time::{Duration, with_timeout};
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::{Error, SoftdeviceController};
@@ -114,27 +117,31 @@ async fn connect<'a, 'b>(
     // Connect to peripheral
     info!("[ble_connect] connecting to peripheral {}", target);
     loop {
-        match with_timeout(Duration::from_millis(100), central.connect(&config)).await {
-            Ok(Ok(conn)) => {
-                return Ok(conn);
-            }
-            Ok(Err(e)) => {
+        // match select(delay_ms(5000), central.connect(&config)).await {
+        //     Either::First(_) => {
+        //         // if not connected, try again
+        //         info!("[ble_connect] connect timeout");
+        //         delay_ms(100).await;
+        //     }
+        //     Either::Second(e) => {
+        //         match e {
+        //             Ok(conn) => return Ok(conn),
+        //             Err(e) => {
+        //                 // error connecting
+        //                 info!("[ble_connect] error connecting: {}", e);
+        //                 delay_ms(100).await;
+        //             }
+        //         }
+        //     }
+        // }
+        match central.connect(&config).await {
+            Ok(conn) => return Ok(conn),
+            Err(e) => {
+                // error connecting
                 info!("[ble_connect] error connecting: {}", e);
                 delay_ms(100).await;
             }
-            Err(_) => {
-                // if not connected, try again
-                delay_ms(100).await;
-            }
         }
-        // match central.connect(&config).await {
-        //     Ok(conn) => return Ok(conn),
-        //     Err(e) => {
-        //         // if not connected, try again
-        //         info!("[ble_connect] not connected: {}", e);
-        //         delay_ms(1000).await;
-        //     }
-        // }
     }
 }
 

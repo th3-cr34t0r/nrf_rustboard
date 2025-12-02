@@ -9,7 +9,7 @@ pub const SPLIT_SERVICE: BluetoothUuid16 = BluetoothUuid16::new(0xff11);
 pub const SPLIT_REPORT_CH: BluetoothUuid16 = BluetoothUuid16::new(0xff22);
 
 // #[gatt_server]
-#[gatt_server(cccd_table_size = 8)]
+#[gatt_server(cccd_table_size = 8, connections_max = 2)]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
     pub(crate) hid_service: HidService,

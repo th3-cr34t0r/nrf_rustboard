@@ -34,6 +34,7 @@ use crate::ble::services::BleHidServer;
 use crate::ble::services::SPLIT_SERVICE;
 use crate::config::BLE_NAME;
 use crate::config::COLS;
+use crate::config::MATRIX_KEYS_BUFFER;
 use crate::config::SPLIT_PERIPHERAL;
 use crate::matrix::KeyPos;
 use crate::storage::{load_bonding_info, store_bonding_info};
@@ -102,11 +103,7 @@ pub async fn ble_peripheral_run<RNG, S>(
     .expect("Failed to create GATT Server");
 
     // init cccd_table
-    CCCD_TABLE
-        .sender()
-        .send(CccdTable::new([(0u16, 0.into()); 8]));
-
-    info!("[ble] server initialized");
+    CCCD_TABLE.signal(CccdTable::new([(0u16, 0.into()); 8]));
 
     let _ = join(
         // backgroun task
@@ -133,7 +130,7 @@ pub async fn ble_peripheral_run<RNG, S>(
                                         let _ = select3(
                                             gatt_events_handler(&conn_2, &server),
                                             battery_service_task(&conn_2, &server),
-                                            keyboard_service_task(&conn_2, &server),
+                                            hid_kb_service_task(&conn_2, &server),
                                         )
                                         .await;
                                     }
@@ -195,8 +192,7 @@ async fn advertise<'a, 'b>(
 
     info!("[adv] advertising, waiting for connection...");
     let raw_conn = advertiser.accept().await?;
-
-    server.set_cccd_table(&raw_conn, CCCD_TABLE.receiver().unwrap().get().await);
+    // server.set_cccd_table(&raw_conn, CCCD_TABLE.try_take().unwrap());
 
     let gatt_conn = raw_conn.with_attribute_server(&server)?;
 
@@ -220,11 +216,8 @@ async fn gatt_events_handler<
     let battery_service_level = server.battery_service.level;
     let split_service_registered_keys = server.split_service.registered_keys;
 
-    let mut matrix_keys_receiver = MATRIX_KEYS
-        .receiver()
-        .expect("[key_provision] unable to create matrix_key_receiver");
-
     let matrix_keys_sender = MATRIX_KEYS.sender();
+    let mut matrix_keys_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
 
     let reason = loop {
         match conn.next().await {
@@ -272,25 +265,25 @@ async fn gatt_events_handler<
                             // central message to peripheral
                             let central_data = event.data();
 
-                            // get the matrix keys
-                            let mut matrix_keys = matrix_keys_receiver.get().await;
-
                             // store the central keys in matrix keys
-                            for combined_key in central_data.iter() {
+                            for (index, combined_key) in central_data.iter().enumerate() {
                                 if *combined_key != 255u8 {
-                                    if let Some(index) = matrix_keys
-                                        .iter_mut()
-                                        .position(|m_key| *m_key == KeyPos::default())
-                                    {
-                                        let col = (combined_key & 0x0f) + COLS as u8 + 1;
-                                        let row = combined_key >> 4;
+                                    // if let Some(index) = matrix_keys_local
+                                    //     .iter_mut()
+                                    //     .position(|m_key| *m_key == KeyPos::default())
+                                    // {
+                                    let col = (combined_key & 0x0f) + COLS as u8;
+                                    let row = combined_key >> 4;
 
-                                        matrix_keys[index] = KeyPos { row, col };
-                                    }
+                                    matrix_keys_local[index] = KeyPos { row, col };
+                                } else {
+                                    matrix_keys_local[index] = KeyPos::default();
                                 }
                             }
                             // send the new matrix_keys
-                            matrix_keys_sender.send(matrix_keys);
+                            matrix_keys_sender.send(matrix_keys_local);
+                            // reset matrix keys
+                            // matrix_keys_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
                         } else if event.handle() == hid_service_report_map.handle {
                             info!(
                                 "[gatt] Write Event to HID Characteristic {:?}",
@@ -361,7 +354,7 @@ async fn battery_service_task<'stack, 'server>(
 }
 
 /// Keyboard serivce task
-async fn keyboard_service_task<'stack, 'server>(
+async fn hid_kb_service_task<'stack, 'server>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
 ) {

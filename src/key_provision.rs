@@ -207,6 +207,8 @@ impl KeyProvision {
             .receiver()
             .expect("[key_provision] unable to create matrix_key_receiver");
 
+        let mut matrix_keys_sender = MATRIX_KEYS.sender();
+
         #[cfg(feature = "peripheral")]
         let key_report_sender = KEY_REPORT.sender();
         #[cfg(feature = "central")]

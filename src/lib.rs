@@ -30,7 +30,7 @@ pub static MESSAGE_TO_PERI: Watch<CriticalSectionRawMutex, [u8; 6], 2> = Watch::
 pub static MATRIX_KEYS: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEYS_BUFFER], 3> =
     Watch::new();
 
-pub static CCCD_TABLE: Watch<CriticalSectionRawMutex, CccdTable<8>, 3> = Watch::new();
+pub static CCCD_TABLE: Signal<CriticalSectionRawMutex, CccdTable<8>> = Signal::new();
 
 use embassy_time::{Duration, Timer};
 

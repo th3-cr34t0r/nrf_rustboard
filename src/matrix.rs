@@ -54,6 +54,7 @@ pub struct Matrix<'a> {
     rows: [Output<'a>; ROWS],
     cols: [Input<'a>; COLS],
     registered_keys: [KeyPos; MATRIX_KEYS_BUFFER],
+    registered_keys_old: [KeyPos; MATRIX_KEYS_BUFFER],
     reg_keys_local_written_time: Instant,
     reg_key_last_time: Instant,
 }
@@ -64,6 +65,7 @@ impl<'a> Matrix<'a> {
             rows,
             cols,
             registered_keys: [KeyPos::default(); MATRIX_KEYS_BUFFER],
+            registered_keys_old: [KeyPos::default(); MATRIX_KEYS_BUFFER],
             reg_keys_local_written_time: Instant::now(),
             reg_key_last_time: Instant::now(),
         }
@@ -152,24 +154,36 @@ impl<'a> Matrix<'a> {
                 delay_ms(1).await;
             }
 
+            // // send the new value
+            // if self
+            //     .registered_keys
+            //     .iter()
+            //     .any(|&l_kp| l_kp != KeyPos::default())
+            // {
+            //     matrix_keys_sender.send(self.registered_keys.clone());
+
+            //     info!(
+            //         "[matrix scan] self.reg_keys_local_new: {:?}",
+            //         self.registered_keys
+            //     );
+
+            //     // reset the array
+            //     self.registered_keys.fill(KeyPos::default());
+            // }
+
+            // self.reg_keys_local_written_time = Instant::now();
+
             // send the new value
-            if self
-                .registered_keys
-                .iter()
-                .any(|&l_kp| l_kp != KeyPos::default())
+            if (self.registered_keys != self.registered_keys_old)
+                || (Instant::now() >= self.reg_keys_local_written_time + Duration::from_millis(5))
             {
                 matrix_keys_sender.send(self.registered_keys.clone());
 
-                info!(
-                    "[matrix scan] self.reg_keys_local_new: {:?}",
-                    self.registered_keys
-                );
-
-                // reset the array
+                self.registered_keys_old = self.registered_keys;
                 self.registered_keys.fill(KeyPos::default());
-            }
 
-            self.reg_keys_local_written_time = Instant::now();
+                self.reg_keys_local_written_time = Instant::now();
+            }
         }
     }
 }
