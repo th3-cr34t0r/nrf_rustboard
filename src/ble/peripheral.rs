@@ -26,8 +26,8 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
 
-use crate::CCCD_TABLE;
-use crate::MATRIX_KEYS;
+use crate::MATRIX_KEYS_LOCAL;
+use crate::MATRIX_KEYS_SPLIT;
 use crate::ble::ble_task;
 use crate::ble::get_device_address;
 use crate::ble::services::BleHidServer;
@@ -63,6 +63,8 @@ pub async fn ble_peripheral_run<RNG, S>(
 {
     // ble address
     let address: Address = get_device_address();
+
+    #[cfg(feature = "debug")]
     info!("[ble] addrress: {}", address);
 
     let resources = {
@@ -101,9 +103,6 @@ pub async fn ble_peripheral_run<RNG, S>(
         appearance: &appearance::human_interface_device::KEYBOARD,
     }))
     .expect("Failed to create GATT Server");
-
-    // init cccd_table
-    CCCD_TABLE.signal(CccdTable::new([(0u16, 0.into()); 8]));
 
     let _ = join(
         // backgroun task
@@ -160,7 +159,9 @@ async fn advertise<'a, 'b>(
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
     let mut advertiser_data = [0; 31];
 
+    #[cfg(feature = "debug")]
     info!("[adv] creating adStructure");
+
     AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
@@ -179,7 +180,9 @@ async fn advertise<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
+    #[cfg(feature = "debug")]
     info!("[adv] creating advertiser");
+
     let advertiser = peripheral
         .advertise(
             &Default::default(),
@@ -190,7 +193,9 @@ async fn advertise<'a, 'b>(
         )
         .await?;
 
+    #[cfg(feature = "debug")]
     info!("[adv] advertising, waiting for connection...");
+
     let raw_conn = advertiser.accept().await?;
     // server.set_cccd_table(&raw_conn, CCCD_TABLE.try_take().unwrap());
 
@@ -216,8 +221,8 @@ async fn gatt_events_handler<
     let battery_service_level = server.battery_service.level;
     let split_service_registered_keys = server.split_service.registered_keys;
 
-    let matrix_keys_sender = MATRIX_KEYS.sender();
-    let mut matrix_keys_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
+    let matrix_keys_split_sender = MATRIX_KEYS_SPLIT.sender();
+    let mut matrix_keys_split_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
 
     let reason = loop {
         match conn.next().await {
@@ -275,15 +280,13 @@ async fn gatt_events_handler<
                                     let col = (combined_key & 0x0f) + COLS as u8;
                                     let row = combined_key >> 4;
 
-                                    matrix_keys_local[index] = KeyPos { row, col };
+                                    matrix_keys_split_local[index] = KeyPos { row, col };
                                 } else {
-                                    matrix_keys_local[index] = KeyPos::default();
+                                    matrix_keys_split_local[index] = KeyPos::default();
                                 }
                             }
                             // send the new matrix_keys
-                            matrix_keys_sender.send(matrix_keys_local);
-                            // reset matrix keys
-                            // matrix_keys_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
+                            matrix_keys_split_sender.send(matrix_keys_split_local);
                         } else if event.handle() == hid_service_report_map.handle {
                             info!(
                                 "[gatt] Write Event to HID Characteristic {:?}",

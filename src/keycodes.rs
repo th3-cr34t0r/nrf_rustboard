@@ -1,9 +1,10 @@
+use defmt::Format;
 use usbd_hid::descriptor::KeyboardUsage;
 
 /// Short‑hand enum that mirrors every variant of `KeyboardUsage`.
 /// The discriminants are exactly the same HID usage codes, so you can use
 /// `KC` wherever the original values are required while keeping the terse names.
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Format)]
 pub enum KC {
     // ------------------------------------------------------------------------
     // 0x00: Reserved

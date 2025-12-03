@@ -1,11 +1,12 @@
+use defmt::{info, warn};
 use embassy_futures::select::{Either, select};
 use embassy_time::Instant;
 use heapless::Vec;
 use usbd_hid::descriptor::KeyboardReport;
 
 use crate::{
-    KEY_REPORT, MATRIX_KEYS, MATRIX_KEYS_BUFFER, MESSAGE_TO_PERI,
-    config::{COLS, KEY_DEBOUNCE, LAYERS, ROWS},
+    KEY_REPORT, MATRIX_KEYS_LOCAL, MATRIX_KEYS_SPLIT, MESSAGE_TO_PERI,
+    config::{COLS, KEY_DEBOUNCE, LAYERS, MATRIX_KEYS_BUFFER, MATRIX_KEYS_COMB_BUFFER, ROWS},
     delay_ms,
     keycodes::{KC, KeyType},
     keymap::provide_keymap,
@@ -153,82 +154,142 @@ impl KeyProvision {
         }
     }
 
-    async fn matrix_to_hid(
+    async fn matrix_to_hid_local(
         &self,
-        matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>,
+        matrix_keys_local: &mut [Key; MATRIX_KEYS_COMB_BUFFER],
         matrix_keys_received: &[KeyPos; MATRIX_KEYS_BUFFER],
     ) {
-        for key_pos in matrix_keys_received.iter() {
-            if *key_pos != KeyPos::default() {
+        for (index_received, key_pos_received) in matrix_keys_received.iter().enumerate() {
+            if *key_pos_received != KeyPos::default() {
                 #[cfg(feature = "debug")]
                 info!(
                     "[matrix_to_hid] matrix_keys_received: r{} c{}",
                     key_pos.row, key_pos.col
                 );
 
-                let time = Instant::now();
-
-                if let Some(contained_key) = matrix_keys_local
-                    .iter_mut()
-                    .find(|key| key.position == *key_pos)
+                // if new key is not contained, add it
+                if None
+                    == matrix_keys_local
+                        .iter_mut()
+                        .find(|key| key.position == *key_pos_received)
                 {
-                    contained_key.time = time;
-                    contained_key.state = KeyState::Pressed;
-                } else {
                     let key = Key {
                         #[cfg(feature = "peripheral")]
-                        code: self.keymap[self.layer as usize][key_pos.row as usize]
-                            [key_pos.col as usize],
+                        code: self.keymap[self.layer as usize][key_pos_received.row as usize]
+                            [key_pos_received.col as usize],
 
                         #[cfg(feature = "central")]
                         code: KC::EU,
-                        position: *key_pos,
-                        time: time,
+                        position: *key_pos_received,
+                        time: Instant::now(),
                         state: KeyState::Pressed,
                     };
-                    matrix_keys_local.push(key).unwrap();
-                }
 
+                    // set the new key in an empty slot
+                    matrix_keys_local[index_received] = key;
+                }
+            } else {
+                if matrix_keys_local[index_received].position != KeyPos::default() {
+                    matrix_keys_local[index_received].state = KeyState::Released;
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "peripheral")]
+    async fn matrix_to_hid_split(
+        &self,
+        matrix_keys_local: &mut [Key; MATRIX_KEYS_COMB_BUFFER],
+        matrix_keys_received: &[KeyPos; MATRIX_KEYS_BUFFER],
+    ) {
+        for (index_received, key_pos_received) in matrix_keys_received.iter().enumerate() {
+            let index_received = index_received + MATRIX_KEYS_BUFFER;
+            if *key_pos_received != KeyPos::default() {
                 #[cfg(feature = "debug")]
+                info!(
+                    "[matrix_to_hid] matrix_keys_received: r{} c{}",
+                    key_pos.row, key_pos.col
+                );
+
+                // if new key is not contained, add it
+                if None
+                    == matrix_keys_local
+                        .iter_mut()
+                        .find(|key| key.position == *key_pos_received)
                 {
-                    for key in matrix_keys_local.iter() {
-                        info!(
-                            "[matrix_to_hid] matrix_keys_local: r{} c{}",
-                            key.position.row, key.position.col
-                        );
-                    }
+                    let key = Key {
+                        code: self.keymap[self.layer as usize][key_pos_received.row as usize]
+                            [key_pos_received.col as usize],
+                        position: *key_pos_received,
+                        time: Instant::now(),
+                        state: KeyState::Pressed,
+                    };
+
+                    // set the new key in an empty slot
+                    matrix_keys_local[index_received] = key;
+                }
+            } else {
+                if matrix_keys_local[index_received].position != KeyPos::default() {
+                    matrix_keys_local[index_received].state = KeyState::Released;
                 }
             }
         }
     }
     /// Provision the keys in case of modifiers, combos, macros etc.
     pub async fn run(&mut self) {
-        let mut matrix_keys_receiver = MATRIX_KEYS
+        let mut matrix_keys_local_receiver = MATRIX_KEYS_LOCAL
             .receiver()
-            .expect("[key_provision] unable to create matrix_key_receiver");
-
-        let mut matrix_keys_sender = MATRIX_KEYS.sender();
+            .expect("[key_provision] unable to create matrix_key_local_receiver");
+        #[cfg(feature = "peripheral")]
+        let mut matrix_keys_split_receiver = MATRIX_KEYS_SPLIT
+            .receiver()
+            .expect("[key_provision] unable to create matrix_key_split_receiver");
 
         #[cfg(feature = "peripheral")]
         let key_report_sender = KEY_REPORT.sender();
         #[cfg(feature = "central")]
         let message_to_peri = MESSAGE_TO_PERI.sender();
 
-        let mut matrix_keys_local: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
-        let mut keys_to_remove: Vec<Key, MATRIX_KEYS_BUFFER> = Vec::new();
+        let mut matrix_keys_local = [Key::default(); MATRIX_KEYS_COMB_BUFFER];
+        // let mut matrix_keys_local: Vec<Key, { MATRIX_KEYS_COMB_BUFFER }> = Vec::new();
+        let mut keys_to_remove: Vec<Key, MATRIX_KEYS_COMB_BUFFER> = Vec::new();
 
         loop {
-            match select(matrix_keys_receiver.changed(), delay_ms(5)).await {
-                Either::First(matrix_keys_received) => {
-                    // transform the received matrix keys
-                    self.matrix_to_hid(&mut matrix_keys_local, &matrix_keys_received)
+            #[cfg(feature = "peripheral")]
+            match select(
+                matrix_keys_local_receiver.changed(),
+                matrix_keys_split_receiver.changed(),
+            )
+            .await
+            {
+                Either::First(matrix_keys_local_received) => {
+                    // transform the received local matrix keys
+                    self.matrix_to_hid_local(&mut matrix_keys_local, &matrix_keys_local_received)
                         .await;
                 }
-                Either::Second(_) => {} // continue with the provisioning
+                Either::Second(matrix_keys_split_received) => {
+                    // transform the received split matrix keys
+                    self.matrix_to_hid_split(&mut matrix_keys_local, &matrix_keys_split_received)
+                        .await;
+                }
             }
 
-            // process the keys to keyreport
-            for key in matrix_keys_local.iter_mut() {
+            #[cfg(feature = "central")]
+            {
+                let matrix_keys_local_received = matrix_keys_local_receiver.changed().await;
+                self.matrix_to_hid_local(&mut matrix_keys_local, &matrix_keys_local_received)
+                    .await;
+            }
+
+            // process the non default keys to keyreport
+            info!(
+                "[key_provision] matrix_keys_local: {:#?}",
+                matrix_keys_local
+            );
+            for key in matrix_keys_local
+                .iter_mut()
+                .filter(|key| key.position != KeyPos::default())
+            {
                 match key.state {
                     KeyState::Pressed => {
                         #[cfg(feature = "peripheral")]
@@ -290,23 +351,19 @@ impl KeyProvision {
                     .iter()
                     .position(|k| k.position == key.position)
                 {
-                    matrix_keys_local.remove(position);
+                    matrix_keys_local[position] = Key::default();
                 }
             }
 
+            // send report
             #[cfg(feature = "peripheral")]
-            // send the report only if different from the old one
-            if self.keyreport_local != self.keyreport_local_old {
-                // send report
-                key_report_sender.send(self.keyreport_local);
-                #[cfg(feature = "debug")]
-                info!(
-                    "[key_provision] keyreport_local.keycodes: {:?}",
-                    self.keyreport_local.keycodes
-                );
+            key_report_sender.send(self.keyreport_local);
 
-                self.keyreport_local_old = self.keyreport_local;
-            }
+            #[cfg(feature = "debug")]
+            info!(
+                "[key_provision] keyreport_local.keycodes: {:?}",
+                self.keyreport_local.keycodes
+            );
 
             #[cfg(feature = "central")]
             {
@@ -321,7 +378,7 @@ impl KeyProvision {
                 }
             }
             // debounce
-            self.debounce(&mut matrix_keys_local).await;
+            // self.debounce(&mut matrix_keys_local).await;
         }
     }
 }

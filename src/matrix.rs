@@ -1,6 +1,6 @@
 use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, KEY_INTERUPT_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
 use crate::keycodes::KC;
-use crate::{MATRIX_KEYS, delay_ms, delay_us};
+use crate::{MATRIX_KEYS_LOCAL, delay_ms, delay_us};
 
 use core::pin::pin;
 use defmt::{Format, info};
@@ -24,14 +24,14 @@ impl KeyPos {
     }
 }
 
-#[derive(Default, PartialEq, Debug, Clone, Copy)]
+#[derive(Default, PartialEq, Debug, Clone, Copy, Format)]
 pub enum KeyState {
     #[default]
     Released,
     Pressed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Format)]
 pub struct Key {
     pub code: KC,
     pub position: KeyPos,
@@ -53,10 +53,8 @@ impl Default for Key {
 pub struct Matrix<'a> {
     rows: [Output<'a>; ROWS],
     cols: [Input<'a>; COLS],
-    registered_keys: [KeyPos; MATRIX_KEYS_BUFFER],
+    registered_keys_new: [KeyPos; MATRIX_KEYS_BUFFER],
     registered_keys_old: [KeyPos; MATRIX_KEYS_BUFFER],
-    reg_keys_local_written_time: Instant,
-    reg_key_last_time: Instant,
 }
 
 impl<'a> Matrix<'a> {
@@ -64,10 +62,8 @@ impl<'a> Matrix<'a> {
         Self {
             rows,
             cols,
-            registered_keys: [KeyPos::default(); MATRIX_KEYS_BUFFER],
+            registered_keys_new: [KeyPos::default(); MATRIX_KEYS_BUFFER],
             registered_keys_old: [KeyPos::default(); MATRIX_KEYS_BUFFER],
-            reg_keys_local_written_time: Instant::now(),
-            reg_key_last_time: Instant::now(),
         }
     }
 
@@ -81,10 +77,17 @@ impl<'a> Matrix<'a> {
 
     /// Main function for scanning and registering keys
     pub async fn scan(&mut self) {
-        let matrix_keys_sender = MATRIX_KEYS.sender();
+        let matrix_keys_sender = MATRIX_KEYS_LOCAL.sender();
 
         loop {
-            if Self::is_elapsed(&self.reg_key_last_time, KEY_INTERUPT_DEBOUNCE) {
+            if
+            // Self::is_elapsed(&self.reg_key_last_time, KEY_INTERUPT_DEBOUNCE)
+            //     &&
+            self
+                .registered_keys_new
+                .iter()
+                .all(|key_pos| *key_pos == KeyPos::default())
+            {
                 for row in self.rows.iter_mut() {
                     row.set_high();
                     // delay so port propagates
@@ -95,7 +98,7 @@ impl<'a> Matrix<'a> {
                 let mut futures: Vec<_, COLS> = self
                     .cols
                     .iter_mut()
-                    .map(|col| col.wait_for_high())
+                    .map(|col| col.wait_for_any_edge())
                     .collect();
 
                 match select(
@@ -132,17 +135,27 @@ impl<'a> Matrix<'a> {
                         };
 
                         // add the new key position only if it is not contained
-                        if !self.registered_keys.contains(&new_key_position) {
+                        if !self.registered_keys_new.contains(&new_key_position) {
                             // add it to a free slot
                             if let Some(index) = self
-                                .registered_keys
+                                .registered_keys_new
                                 .iter()
                                 .position(|&key_pos| key_pos == KeyPos::default())
                             {
-                                self.registered_keys[index] = new_key_position;
+                                self.registered_keys_new[index] = new_key_position;
                             };
-
-                            self.reg_key_last_time = Instant::now();
+                        }
+                    } else {
+                        let new_key_position = KeyPos {
+                            row: row_count as u8,
+                            col: col_count as u8,
+                        };
+                        if let Some(index) = self
+                            .registered_keys_new
+                            .iter()
+                            .position(|key_pos| *key_pos == new_key_position)
+                        {
+                            self.registered_keys_new[index] = KeyPos::default();
                         }
                     }
                 }
@@ -154,35 +167,12 @@ impl<'a> Matrix<'a> {
                 delay_ms(1).await;
             }
 
-            // // send the new value
-            // if self
-            //     .registered_keys
-            //     .iter()
-            //     .any(|&l_kp| l_kp != KeyPos::default())
-            // {
-            //     matrix_keys_sender.send(self.registered_keys.clone());
-
-            //     info!(
-            //         "[matrix scan] self.reg_keys_local_new: {:?}",
-            //         self.registered_keys
-            //     );
-
-            //     // reset the array
-            //     self.registered_keys.fill(KeyPos::default());
-            // }
-
-            // self.reg_keys_local_written_time = Instant::now();
-
             // send the new value
-            if (self.registered_keys != self.registered_keys_old)
-                || (Instant::now() >= self.reg_keys_local_written_time + Duration::from_millis(5))
-            {
-                matrix_keys_sender.send(self.registered_keys.clone());
+            if self.registered_keys_new != self.registered_keys_old {
+                info!("[matrix] sent keys: {:?}", self.registered_keys_new);
+                matrix_keys_sender.send(self.registered_keys_new.clone());
 
-                self.registered_keys_old = self.registered_keys;
-                self.registered_keys.fill(KeyPos::default());
-
-                self.reg_keys_local_written_time = Instant::now();
+                self.registered_keys_old = self.registered_keys_new;
             }
         }
     }
