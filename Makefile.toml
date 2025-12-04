@@ -1,16 +1,26 @@
 [tasks.install-llvm-tools]
 install_crate = { rustup_component_name = "llvm-tools" }
 
-[tasks.objcopy]
+[tasks.objcopy-peripheral]
 install_crate = { crate_name = "cargo-binutils", binary = "cargo", test_arg = [
     "objcopy",
     "--help",
 ] }
 command = "cargo"
-args = ["objcopy", "--release", "--features", "central", "--", "-O", "ihex", "nrf_rustboard.hex"]
+args = ["objcopy", "--release", "--features", "peripheral", "--", "-O", "ihex", "nrf_rustboard_peripheral.hex"]
 dependencies = ["install-llvm-tools"]
 
-[tasks.uf2]
+[tasks.objcopy-central]
+install_crate = { crate_name = "cargo-binutils", binary = "cargo", test_arg = [
+    "objcopy",
+    "--help",
+] }
+command = "cargo"
+args = ["objcopy", "--release", "--features", "central", "--", "-O", "ihex", "nrf_rustboard_central.hex"]
+dependencies = ["install-llvm-tools"]
+
+
+[tasks.uf2-peripheral]
 install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = [
     "hex-to-uf2",
     "--help",
@@ -19,10 +29,30 @@ command = "cargo"
 args = [
     "hex-to-uf2",
     "--input-path",
-    "nrf_rustboard.hex",
+    "nrf_rustboard_peripheral.hex",
     "--output-path",
-    "nrf_rustboard.uf2",
+    "nrf_rustboard_peripheral.uf2",
     "--family",
     "nrf52840",
 ]
-dependencies = ["objcopy"]
+dependencies = ["objcopy-peripheral"]
+
+[tasks.uf2-central]
+install_crate = { crate_name = "cargo-hex-to-uf2", binary = "cargo", test_arg = [
+    "hex-to-uf2",
+    "--help",
+] }
+command = "cargo"
+args = [
+    "hex-to-uf2",
+    "--input-path",
+    "nrf_rustboard_central.hex",
+    "--output-path",
+    "nrf_rustboard_central.uf2",
+    "--family",
+    "nrf52840",
+]
+dependencies = ["objcopy-central"]
+
+[tasks.uf2]
+dependencies = ["uf2-peripheral", "uf2-central"]
