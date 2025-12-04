@@ -21,8 +21,8 @@ use nrf_sdc::{
 use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
 use static_cell::StaticCell;
+use trouble_host::Address;
 use trouble_host::prelude::{DefaultPacketPool, Runner};
-use trouble_host::{Address, HostResources};
 
 use crate::config::SPLIT_PERIPHERAL;
 
@@ -163,9 +163,9 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     spawner.must_spawn(mpsl_task(mpsl));
 
     #[cfg(feature = "central")]
-    crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng, spawner).await;
+    crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng).await;
     #[cfg(feature = "peripheral")]
-    crate::ble::peripheral::ble_peripheral_run(sdc, &mut storage, &mut rng, spawner).await;
+    crate::ble::peripheral::ble_peripheral_run(sdc, &mut storage, &mut rng).await;
 }
 
 pub fn get_device_address() -> Address {

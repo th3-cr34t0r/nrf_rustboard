@@ -8,7 +8,6 @@ use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 pub const SPLIT_SERVICE: BluetoothUuid16 = BluetoothUuid16::new(0xff11);
 pub const SPLIT_REPORT_CH: BluetoothUuid16 = BluetoothUuid16::new(0xff22);
 
-// #[gatt_server]
 #[gatt_server(cccd_table_size = 8, connections_max = 2)]
 pub(crate) struct Server {
     pub(crate) battery_service: BatteryService,
@@ -47,16 +46,4 @@ pub(crate) struct HidService {
 pub(crate) struct SplitService {
     #[characteristic(uuid = "ff22", read, write, notify)]
     pub(crate) registered_keys: [u8; 6],
-}
-
-pub struct BleHidServer {
-    pub input_keyboard: Characteristic<[u8; 8]>,
-}
-
-impl<'s> BleHidServer {
-    pub fn new(server: Server<'s>) -> Self {
-        Self {
-            input_keyboard: server.hid_service.input_keyboard,
-        }
-    }
 }

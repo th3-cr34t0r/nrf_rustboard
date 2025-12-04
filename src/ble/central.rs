@@ -2,12 +2,7 @@
 //
 
 use defmt::info;
-use embassy_executor::Spawner;
-use embassy_futures::{
-    join::join,
-    select::{self, Either, select},
-};
-use embassy_time::{Duration, with_timeout};
+use embassy_futures::join::join;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::{Error, SoftdeviceController};
 use rand::{CryptoRng, RngCore};
@@ -38,7 +33,6 @@ pub async fn ble_central_run<RNG, S>(
     sdc: SoftdeviceController<'static>,
     mut storage: &mut S,
     rng: &mut RNG,
-    spawner: Spawner,
 ) where
     RNG: RngCore + CryptoRng,
     S: NorFlash,
