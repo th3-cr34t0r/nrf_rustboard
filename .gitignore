@@ -1,3 +1,5 @@
 target/
-nrf_rustboard.hex
-nrf_rustboard.uf2
+nrf_rustboard_peripheral.hex
+nrf_rustboard_central.hex
+nrf_rustboard_peripheral.uf2
+nrf_rustboard_central.uf2
