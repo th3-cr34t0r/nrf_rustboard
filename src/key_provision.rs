@@ -20,8 +20,6 @@ pub struct KeyProvision {
     keymap: [[[KC; COLS * 2]; ROWS]; LAYERS],
     #[cfg(feature = "peripheral")]
     keyreport_local: KeyboardReport,
-    #[cfg(feature = "peripheral")]
-    keyreport_local_old: KeyboardReport,
     #[cfg(feature = "central")]
     message_to_peri_local: [u8; 6],
     #[cfg(feature = "central")]
@@ -40,8 +38,6 @@ impl KeyProvision {
             keymap: provide_keymap(),
             #[cfg(feature = "peripheral")]
             keyreport_local: KeyboardReport::default(),
-            #[cfg(feature = "peripheral")]
-            keyreport_local_old: KeyboardReport::default(),
 
             #[cfg(feature = "central")]
             message_to_peri_local: [255; 6],
@@ -142,17 +138,17 @@ impl KeyProvision {
     }
 
     /// Debounce the registered keys
-    async fn debounce(&self, matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>) {
-        let instant = Instant::now();
+    // async fn debounce(&self, matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>) {
+    //     let instant = Instant::now();
 
-        for key in matrix_keys_local.iter_mut() {
-            if instant >= key.time + KEY_DEBOUNCE {
-                #[cfg(feature = "debug")]
-                info!("[debounce] debounced key: {}", key.code as u8);
-                key.state = KeyState::Released;
-            }
-        }
-    }
+    //     for key in matrix_keys_local.iter_mut() {
+    //         if instant >= key.time + KEY_DEBOUNCE {
+    //             #[cfg(feature = "debug")]
+    //             info!("[debounce] debounced key: {}", key.code as u8);
+    //             key.state = KeyState::Released;
+    //         }
+    //     }
+    // }
 
     async fn matrix_to_hid_local(
         &self,
@@ -181,7 +177,6 @@ impl KeyProvision {
                         #[cfg(feature = "central")]
                         code: KC::EU,
                         position: *key_pos_received,
-                        time: Instant::now(),
                         state: KeyState::Pressed,
                     };
 
@@ -221,7 +216,6 @@ impl KeyProvision {
                         code: self.keymap[self.layer as usize][key_pos_received.row as usize]
                             [key_pos_received.col as usize],
                         position: *key_pos_received,
-                        time: Instant::now(),
                         state: KeyState::Pressed,
                     };
 
@@ -282,6 +276,7 @@ impl KeyProvision {
             }
 
             // process the non default keys to keyreport
+            #[cfg(feature = "debug")]
             info!(
                 "[key_provision] matrix_keys_local: {:#?}",
                 matrix_keys_local
@@ -377,8 +372,6 @@ impl KeyProvision {
                     self.message_to_peri_local_old = self.message_to_peri_local;
                 }
             }
-            // debounce
-            // self.debounce(&mut matrix_keys_local).await;
         }
     }
 }
