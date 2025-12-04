@@ -109,7 +109,7 @@ pub enum KC {
     // ------------------------------------------------------------------------
     // 0x2D‑0x35: Symbol keys
     /// Keyboard - and _ (Footnote 2)
-    DashUnderscore = KeyboardUsage::KeyboardDashUnderscore as isize,
+    Dash = KeyboardUsage::KeyboardDashUnderscore as isize,
     /// Keyboard = and + (Footnote 2)
     Equal = KeyboardUsage::KeyboardEqualPlus as isize,
     /// Keyboard [ and { (Footnote 2)
