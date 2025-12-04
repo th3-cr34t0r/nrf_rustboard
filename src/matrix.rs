@@ -1,9 +1,9 @@
-use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, KEY_INTERUPT_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
+use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
 use crate::keycodes::KC;
 use crate::{MATRIX_KEYS_LOCAL, delay_ms, delay_us};
 
 use core::pin::pin;
-use defmt::{Format, info};
+use defmt::Format;
 use embassy_futures::select::{Either, select, select_slice};
 use embassy_nrf::gpio::{Input, Output};
 use embassy_time::{Duration, Instant};
@@ -35,7 +35,6 @@ pub enum KeyState {
 pub struct Key {
     pub code: KC,
     pub position: KeyPos,
-    pub time: Instant,
     pub state: KeyState,
 }
 
@@ -44,7 +43,6 @@ impl Default for Key {
         Self {
             code: KC::EU,
             position: KeyPos::default(),
-            time: Instant::now(),
             state: KeyState::default(),
         }
     }
@@ -64,14 +62,6 @@ impl<'a> Matrix<'a> {
             cols,
             registered_keys_new: [KeyPos::default(); MATRIX_KEYS_BUFFER],
             registered_keys_old: [KeyPos::default(); MATRIX_KEYS_BUFFER],
-        }
-    }
-
-    fn is_elapsed(time: &Instant, debounce: Duration) -> bool {
-        if Instant::now() >= *time + debounce {
-            true
-        } else {
-            false
         }
     }
 
@@ -169,6 +159,7 @@ impl<'a> Matrix<'a> {
 
             // send the new value
             if self.registered_keys_new != self.registered_keys_old {
+                #[cfg(feature = "debug")]
                 info!("[matrix] sent keys: {:?}", self.registered_keys_new);
                 matrix_keys_sender.send(self.registered_keys_new.clone());
 
