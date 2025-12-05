@@ -2,6 +2,7 @@ use defmt::{error, info};
 use embassy_futures::join::join;
 use embassy_futures::select::select3;
 
+use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::Error;
 use nrf_sdc::SoftdeviceController;
@@ -11,6 +12,10 @@ use trouble_host::HostResources;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
+use trouble_host::prelude::AdvFilterPolicy;
+use trouble_host::prelude::AdvertisementParameters;
+use trouble_host::prelude::PhyKind;
+use trouble_host::prelude::TxPower;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
     AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
@@ -98,16 +103,16 @@ pub async fn ble_peripheral_run<RNG, S>(
         // advertiser
         async {
             loop {
-                match advertise(&mut peripheral, &server).await {
+                match advertise_split(&mut peripheral, &server).await {
                     Ok(conn_1) => {
                         // info!("[adv] bond_stored: {}", bond_stored);
                         info!("[adv] Connected! Running service tasks");
                         delay_ms(1000).await;
 
-                        let _ = join(gatt_events_handler(&conn_1, &server), async {
+                        let _ = join(gatt_split_events_handler(&conn_1, &server), async {
                             loop {
                                 // advertise to connect second central
-                                match advertise(&mut peripheral, &server).await {
+                                match advertise_hid(&mut peripheral, &server).await {
                                     Ok(conn_2) => {
                                         // set bondable
                                         conn_2
@@ -116,7 +121,7 @@ pub async fn ble_peripheral_run<RNG, S>(
                                             .expect("[ble] error setting bondable");
 
                                         let _ = select3(
-                                            gatt_events_handler_2(
+                                            gatt_hid_events_handler(
                                                 &conn_2,
                                                 &server,
                                                 &mut storage,
@@ -147,7 +152,55 @@ pub async fn ble_peripheral_run<RNG, S>(
 }
 
 /// Advertiser task
-async fn advertise<'a, 'b>(
+async fn advertise_split<'a, 'b>(
+    peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
+    server: &'b Server<'_>,
+) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
+    let mut advertiser_data = [0; 31];
+
+    #[cfg(feature = "debug")]
+    info!("[adv] creating adStructure");
+
+    AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(BR_EDR_NOT_SUPPORTED),
+            AdStructure::ServiceUuids16(&[SPLIT_SERVICE.to_le_bytes()]),
+        ],
+        &mut advertiser_data[..],
+    )?;
+
+    let ad_params = AdvertisementParameters {
+        primary_phy: PhyKind::Le2M,
+        secondary_phy: PhyKind::Le2M,
+        tx_power: TxPower::Plus8dBm,
+        interval_min: Duration::from_millis(160),
+        interval_max: Duration::from_millis(160),
+        ..Default::default()
+    };
+
+    #[cfg(feature = "debug")]
+    info!("[adv] creating advertiser");
+
+    let advertiser = peripheral
+        .advertise(
+            &ad_params,
+            Advertisement::ConnectableScannableUndirected {
+                adv_data: &advertiser_data[..],
+                scan_data: &[],
+            },
+        )
+        .await?;
+
+    #[cfg(feature = "debug")]
+    info!("[adv] advertising, waiting for connection...");
+
+    let gatt_conn = advertiser.accept().await?.with_attribute_server(&server)?;
+
+    info!("[adv] connection established");
+
+    Ok(gatt_conn)
+}
+async fn advertise_hid<'a, 'b>(
     peripheral: &mut Peripheral<'a, SoftdeviceController<'static>, DefaultPacketPool>,
     server: &'b Server<'_>,
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
@@ -174,12 +227,21 @@ async fn advertise<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
+    let ad_params = AdvertisementParameters {
+        primary_phy: PhyKind::Le2M,
+        secondary_phy: PhyKind::Le2M,
+        tx_power: TxPower::Plus8dBm,
+        interval_min: Duration::from_millis(160),
+        interval_max: Duration::from_millis(160),
+        ..Default::default()
+    };
+
     #[cfg(feature = "debug")]
     info!("[adv] creating advertiser");
 
     let advertiser = peripheral
         .advertise(
-            &Default::default(),
+            &ad_params,
             Advertisement::ConnectableScannableUndirected {
                 adv_data: &advertiser_data[..],
                 scan_data: &[],
@@ -198,12 +260,10 @@ async fn advertise<'a, 'b>(
 }
 
 /// Gatt event handelr task
-async fn gatt_events_handler<'stack, 'server>(
+async fn gatt_split_events_handler<'stack, 'server>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
 ) -> Result<(), Error> {
-    let hid_service_report_map = server.hid_service.report_map;
-    let battery_service_level = server.battery_service.level;
     let split_service_registered_keys = server.split_service.registered_keys;
 
     let matrix_keys_split_sender = MATRIX_KEYS_SPLIT.sender();
@@ -231,14 +291,6 @@ async fn gatt_events_handler<'stack, 'server>(
             GattConnectionEvent::Gatt { event } => {
                 match &event {
                     GattEvent::Read(event) => {
-                        if event.handle() == hid_service_report_map.handle {
-                            let value = server.get(&hid_service_report_map);
-                            info!("[gatt] Read Event to HID Characteristic: {:?}", value);
-                        } else if event.handle() == battery_service_level.handle {
-                            let value = server.get(&battery_service_level);
-                            info!("[gatt] Read Event to Level Characteristic: {:?}", value);
-                        }
-
                         if conn
                             .raw()
                             .security_level()
@@ -258,10 +310,6 @@ async fn gatt_events_handler<'stack, 'server>(
                             // store the central keys in matrix keys
                             for (index, combined_key) in central_data.iter().enumerate() {
                                 if *combined_key != 255u8 {
-                                    // if let Some(index) = matrix_keys_local
-                                    //     .iter_mut()
-                                    //     .position(|m_key| *m_key == KeyPos::default())
-                                    // {
                                     let col = (combined_key & 0x0f) + COLS as u8;
                                     let row = combined_key >> 4;
 
@@ -272,16 +320,6 @@ async fn gatt_events_handler<'stack, 'server>(
                             }
                             // send the new matrix_keys
                             matrix_keys_split_sender.send(matrix_keys_split_local);
-                        } else if event.handle() == hid_service_report_map.handle {
-                            info!(
-                                "[gatt] Write Event to HID Characteristic {:?}",
-                                event.data()
-                            );
-                        } else if event.handle() == battery_service_level.handle {
-                            info!(
-                                "[gatt] Write Event to Level Characteristic {:?}",
-                                event.data()
-                            );
                         }
 
                         if conn
@@ -315,7 +353,7 @@ async fn gatt_events_handler<'stack, 'server>(
 }
 
 /// Gatt event handelr task
-async fn gatt_events_handler_2<'stack, 'server, S: NorFlash>(
+async fn gatt_hid_events_handler<'stack, 'server, S: NorFlash>(
     conn: &GattConnection<'stack, 'server, DefaultPacketPool>,
     server: &'server Server<'_>,
     storage: &mut S,
@@ -323,10 +361,6 @@ async fn gatt_events_handler_2<'stack, 'server, S: NorFlash>(
 ) -> Result<(), Error> {
     let hid_service_report_map = server.hid_service.report_map;
     let battery_service_level = server.battery_service.level;
-    let split_service_registered_keys = server.split_service.registered_keys;
-
-    let matrix_keys_split_sender = MATRIX_KEYS_SPLIT.sender();
-    let mut matrix_keys_split_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
 
     let reason = loop {
         match conn.next().await {
@@ -370,24 +404,7 @@ async fn gatt_events_handler_2<'stack, 'server, S: NorFlash>(
                         }
                     }
                     GattEvent::Write(event) => {
-                        if event.handle() == split_service_registered_keys.handle {
-                            // central message to peripheral
-                            let central_data = event.data();
-
-                            // store the central keys in matrix keys
-                            for (index, combined_key) in central_data.iter().enumerate() {
-                                if *combined_key != 255u8 {
-                                    let col = (combined_key & 0x0f) + COLS as u8;
-                                    let row = combined_key >> 4;
-
-                                    matrix_keys_split_local[index] = KeyPos { row, col };
-                                } else {
-                                    matrix_keys_split_local[index] = KeyPos::default();
-                                }
-                            }
-                            // send the new matrix_keys
-                            matrix_keys_split_sender.send(matrix_keys_split_local);
-                        } else if event.handle() == hid_service_report_map.handle {
+                        if event.handle() == hid_service_report_map.handle {
                             info!(
                                 "[gatt] Write Event to HID Characteristic {:?}",
                                 event.data()

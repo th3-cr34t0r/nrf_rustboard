@@ -3,6 +3,7 @@
 
 use defmt::info;
 use embassy_futures::join::join;
+use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::{Error, SoftdeviceController};
 use rand::{CryptoRng, RngCore};
@@ -11,7 +12,8 @@ use trouble_host::{
     Address, Host, HostResources, Stack,
     gatt::GattClient,
     prelude::{
-        Central, Characteristic, ConnectConfig, Connection, DefaultPacketPool, ScanConfig, Uuid,
+        Central, Characteristic, ConnectConfig, ConnectParams, Connection, DefaultPacketPool,
+        ScanConfig, Uuid,
     },
 };
 
@@ -100,12 +102,21 @@ async fn connect<'a, 'b>(
     // address of the target split kb
     let target = Address::random(PERI_ADDRESS);
 
+    let conn_params = ConnectParams {
+        min_connection_interval: Duration::from_micros(7500),
+        max_connection_interval: Duration::from_micros(7500),
+        max_latency: 0,
+        min_event_length: Duration::from_secs(0),
+        max_event_length: Duration::from_secs(0),
+        supervision_timeout: Duration::from_secs(5),
+    };
+
     let config = ConnectConfig {
         scan_config: ScanConfig {
             filter_accept_list: &[(target.kind, &target.addr)],
             ..Default::default()
         },
-        connect_params: Default::default(),
+        connect_params: conn_params,
     };
 
     // Connect to peripheral
