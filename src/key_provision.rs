@@ -1,15 +1,28 @@
+use defmt::info;
+#[cfg(feature = "debug")]
 use defmt::{info, warn};
+#[cfg(feature = "peripheral")]
 use embassy_futures::select::{Either, select};
-use embassy_time::Instant;
+use embassy_time::{Duration, Instant};
 use heapless::Vec;
+#[cfg(feature = "peripheral")]
 use usbd_hid::descriptor::KeyboardReport;
 
+#[cfg(feature = "central")]
+use crate::MESSAGE_TO_PERI;
+
+#[cfg(feature = "peripheral")]
 use crate::{
-    KEY_REPORT, MATRIX_KEYS_LOCAL, MATRIX_KEYS_SPLIT, MESSAGE_TO_PERI,
-    config::{COLS, KEY_DEBOUNCE, LAYERS, MATRIX_KEYS_BUFFER, MATRIX_KEYS_COMB_BUFFER, ROWS},
-    delay_ms,
-    keycodes::{KC, KeyType},
+    KEY_REPORT, MATRIX_KEYS_SPLIT,
+    config::{COLS, LAYERS, ROWS},
+    keycodes::KeyType,
     keymap::provide_keymap,
+};
+
+use crate::{
+    MATRIX_KEYS_LOCAL,
+    config::{MATRIX_KEYS_BUFFER, MATRIX_KEYS_COMB_BUFFER},
+    keycodes::KC,
     matrix::{Key, KeyPos, KeyState},
 };
 
@@ -178,6 +191,7 @@ impl KeyProvision {
                         code: KC::EU,
                         position: *key_pos_received,
                         state: KeyState::Pressed,
+                        time: Instant::now(),
                     };
 
                     // set the new key in an empty slot
@@ -217,6 +231,7 @@ impl KeyProvision {
                             [key_pos_received.col as usize],
                         position: *key_pos_received,
                         state: KeyState::Pressed,
+                        time: Instant::now(),
                     };
 
                     // set the new key in an empty slot
@@ -229,6 +244,23 @@ impl KeyProvision {
             }
         }
     }
+
+    // evaluate if condition is met to enter bootloader
+    async fn evaluate_enter_bootloader(&self, key: &Key) {
+        if Instant::now() >= key.time + Duration::from_secs(5) {
+            let key_pos_enter_bl = KeyPos { row: 0, col: 0 };
+            if key.position == key_pos_enter_bl {
+                // write to register to boot into BL
+                embassy_nrf::pac::POWER
+                    .gpregret()
+                    .write_value(embassy_nrf::pac::power::regs::Gpregret(0x57));
+
+                // reboot into bl
+                cortex_m::peripheral::SCB::sys_reset();
+            }
+        }
+    }
+
     /// Provision the keys in case of modifiers, combos, macros etc.
     pub async fn run(&mut self) {
         let mut matrix_keys_local_receiver = MATRIX_KEYS_LOCAL
@@ -329,6 +361,9 @@ impl KeyProvision {
                                 self.message_to_peri_local[index] = 255;
                             }
                         }
+
+                        // evaluate enter_bootloader
+                        self.evaluate_enter_bootloader(key).await;
 
                         // remember the key to be removed
                         keys_to_remove
