@@ -23,6 +23,3 @@ pub const ENTER_SLEEP_DEBOUNCE: u64 = 600000;
 
 /// Enter interupt on key debounce
 pub const KEY_INTERUPT_DEBOUNCE: Duration = Duration::from_millis(1);
-
-/// Debounce key in ms
-pub const KEY_DEBOUNCE: Duration = Duration::from_millis(20);
