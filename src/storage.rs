@@ -1,4 +1,3 @@
-use core::ops::Range;
 use defmt::info;
 use embedded_storage_async::nor_flash::NorFlash;
 use sequential_storage::cache::NoCache;
