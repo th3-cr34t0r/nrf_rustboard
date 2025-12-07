@@ -6,7 +6,7 @@ use core::pin::pin;
 use defmt::Format;
 use embassy_futures::select::{Either, select, select_slice};
 use embassy_nrf::gpio::{Input, Output};
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 use heapless::Vec;
 
 #[cfg(feature = "debug")]
@@ -36,6 +36,7 @@ pub struct Key {
     pub code: KC,
     pub position: KeyPos,
     pub state: KeyState,
+    pub time: Instant,
 }
 
 impl Default for Key {
@@ -44,6 +45,7 @@ impl Default for Key {
             code: KC::EU,
             position: KeyPos::default(),
             state: KeyState::default(),
+            time: Instant::now(),
         }
     }
 }
@@ -70,10 +72,7 @@ impl<'a> Matrix<'a> {
         let matrix_keys_sender = MATRIX_KEYS_LOCAL.sender();
 
         loop {
-            if
-            // Self::is_elapsed(&self.reg_key_last_time, KEY_INTERUPT_DEBOUNCE)
-            //     &&
-            self
+            if self
                 .registered_keys_new
                 .iter()
                 .all(|key_pos| *key_pos == KeyPos::default())
@@ -98,9 +97,8 @@ impl<'a> Matrix<'a> {
                 .await
                 {
                     Either::First(_) => {
-                        // key has been pressed, scan it
+                        // key has been pressed, but first set all rows to low
                         for row in self.rows.iter_mut() {
-                            // set rows to low
                             row.set_low();
                         }
                     }
@@ -111,10 +109,11 @@ impl<'a> Matrix<'a> {
                 }
             }
 
+            // run matrix scan
             for (row_count, row) in self.rows.iter_mut().enumerate() {
                 row.set_high();
                 // delay so port propagates
-                delay_us(1).await;
+                delay_us(250).await;
 
                 // get the pressed keys
                 for (col_count, col) in self.cols.iter().enumerate() {
@@ -152,9 +151,6 @@ impl<'a> Matrix<'a> {
 
                 // set row to low
                 row.set_low();
-
-                // trottle down the scanning to perserve battery
-                delay_ms(1).await;
             }
 
             // send the new value
