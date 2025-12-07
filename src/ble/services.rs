@@ -44,6 +44,6 @@ pub(crate) struct HidService {
 
 #[gatt_service(uuid = SPLIT_SERVICE)]
 pub(crate) struct SplitService {
-    #[characteristic(uuid = "ff22", read, write, notify)]
+    #[characteristic(uuid = SPLIT_REPORT_CH, read, write, notify)]
     pub(crate) registered_keys: [u8; 6],
 }

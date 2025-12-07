@@ -12,7 +12,6 @@ use trouble_host::HostResources;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
-use trouble_host::prelude::AdvFilterPolicy;
 use trouble_host::prelude::AdvertisementParameters;
 use trouble_host::prelude::PhyKind;
 use trouble_host::prelude::TxPower;
@@ -90,7 +89,7 @@ pub async fn ble_peripheral_run<RNG, S>(
         ..
     } = stack.build();
 
-    // create the peripheral server
+    // create the server
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name: BLE_NAME,
         appearance: &appearance::human_interface_device::KEYBOARD,
@@ -274,23 +273,23 @@ async fn gatt_split_events_handler<'stack, 'server>(
             GattConnectionEvent::Disconnected { reason } => break reason,
             GattConnectionEvent::PairingComplete {
                 security_level,
-                bond,
+                bond: _,
             } => {
                 info!("[gatt] pairing complete: {:?}", security_level);
-                if let Some(bond) = bond {
-                    // store_bonding_info(storage, &bond)
-                    //     .await
-                    //     .expect("[gatt] error storing bond info");
-                    // *bond_stored = true;
-                    info!("[gatt] bond information stored");
-                }
+                // if let Some(bond) = bond {
+                // store_bonding_info(storage, &bond)
+                //     .await
+                //     .expect("[gatt] error storing bond info");
+                // *bond_stored = true;
+                // info!("[gatt] bond information stored");
+                // }
             }
             GattConnectionEvent::PairingFailed(err) => {
                 error!("[gatt] pairing error: {:?}", err);
             }
             GattConnectionEvent::Gatt { event } => {
                 match &event {
-                    GattEvent::Read(event) => {
+                    GattEvent::Read(_event) => {
                         if conn
                             .raw()
                             .security_level()

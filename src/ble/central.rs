@@ -26,7 +26,7 @@ use crate::{
 
 const CONNECTIONS_MAX: usize = 1;
 
-const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX + 4;
+const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX * 4;
 
 type BleHostResources = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
 

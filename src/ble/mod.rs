@@ -24,8 +24,6 @@ use static_cell::StaticCell;
 use trouble_host::Address;
 use trouble_host::prelude::{DefaultPacketPool, Runner};
 
-use crate::config::SPLIT_PERIPHERAL;
-
 use crate::peripherals::BlePeri;
 
 // #[cfg(feature = "central")]
@@ -68,8 +66,6 @@ pub async fn ble_task(
     info!("[ble_task] running runner");
     loop {
         if let Err(e) = runner.run().await {
-            #[cfg(feature = "defmt")]
-            let e = defmt::Debug2Format(&e);
             panic!("[ble_task] error: {:?}", e);
         }
     }
