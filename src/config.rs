@@ -20,6 +20,3 @@ pub const MATRIX_KEYS_COMB_BUFFER: usize = MATRIX_KEYS_BUFFER * 2;
 
 /// Wait for a given time before entering sleep in ms
 pub const ENTER_SLEEP_DEBOUNCE: u64 = 600000;
-
-/// Enter interupt on key debounce
-pub const KEY_INTERUPT_DEBOUNCE: Duration = Duration::from_millis(1);
