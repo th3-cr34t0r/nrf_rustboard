@@ -245,7 +245,7 @@ impl KeyProvision {
         }
     }
 
-    // evaluate if condition is met to enter bootloader
+    /// Evaluate if condition is met to enter bootloader
     async fn evaluate_enter_bootloader(&self, key: &Key) {
         if Instant::now() >= key.time + Duration::from_secs(5) {
             let key_pos_enter_bl = KeyPos { row: 0, col: 0 };
@@ -257,6 +257,26 @@ impl KeyProvision {
 
                 // reboot into bl
                 cortex_m::peripheral::SCB::sys_reset();
+            }
+        }
+    }
+
+    #[cfg(feature = "peripheral")]
+    /// Provision combo keys
+    async fn provision_combos(&mut self, matrix_keys_local: &mut [Key; MATRIX_KEYS_COMB_BUFFER]) {
+        let keys_to_remove: Vec<KC, MATRIX_KEYS_COMB_BUFFER> = Vec::from([KC::LCtrl, KC::Dd]);
+        let keys_to_add: Vec<KC, MATRIX_KEYS_COMB_BUFFER> = Vec::from([KC::LCtrl, KC::Backspace]);
+
+        // check if all combo keys to remove are contained in the matrix keys
+        if keys_to_remove.iter().all(|remove_k| {
+            matrix_keys_local
+                .iter()
+                .any(|contained_k| *remove_k == contained_k.code)
+        }) {
+            for (index_rm, kc_rm) in keys_to_remove.iter().enumerate() {
+                if let Some(index) = matrix_keys_local.iter().position(|k| k.code == *kc_rm) {
+                    matrix_keys_local[index].code = keys_to_add[index_rm];
+                }
             }
         }
     }
@@ -307,6 +327,10 @@ impl KeyProvision {
                     .await;
             }
 
+            // provision combos
+            #[cfg(feature = "peripheral")]
+            self.provision_combos(&mut matrix_keys_local).await;
+
             // process the non default keys to keyreport
             #[cfg(feature = "debug")]
             info!(
@@ -315,7 +339,7 @@ impl KeyProvision {
             );
             for key in matrix_keys_local
                 .iter_mut()
-                .filter(|key| key.position != KeyPos::default())
+                .filter(|key| key.code != KC::default())
             {
                 match key.state {
                     KeyState::Pressed => {
