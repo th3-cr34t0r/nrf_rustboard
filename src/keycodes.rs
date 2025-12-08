@@ -4,7 +4,7 @@ use usbd_hid::descriptor::KeyboardUsage;
 /// Short‑hand enum that mirrors every variant of `KeyboardUsage`.
 /// The discriminants are exactly the same HID usage codes, so you can use
 /// `KC` wherever the original values are required while keeping the terse names.
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Format)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Format, Default)]
 pub enum KC {
     // ------------------------------------------------------------------------
     // 0x00: Reserved
@@ -13,6 +13,7 @@ pub enum KC {
     /// Keyboard POSTFail (Footnote 1)
     PF = KeyboardUsage::KeyboardPOSTFail as isize,
     /// Keyboard ErrorUndefined (Footnote 1)
+    #[default]
     EU = KeyboardUsage::KeyboardErrorUndefined as isize,
 
     // ------------------------------------------------------------------------

@@ -42,7 +42,7 @@ pub struct Key {
 impl Default for Key {
     fn default() -> Self {
         Self {
-            code: KC::EU,
+            code: KC::default(),
             position: KeyPos::default(),
             state: KeyState::default(),
             time: Instant::now(),
