@@ -1,6 +1,6 @@
-use defmt::{error, info};
+use defmt::{error, info, warn};
 use embassy_futures::join::join;
-use embassy_futures::select::select3;
+use embassy_futures::select::{select, select3};
 
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash;
@@ -104,11 +104,10 @@ pub async fn ble_peripheral_run<RNG, S>(
             loop {
                 match advertise_split(&mut peripheral, &server).await {
                     Ok(conn_1) => {
-                        // info!("[adv] bond_stored: {}", bond_stored);
-                        info!("[adv] Connected! Running service tasks");
+                        info!("[split_adv] Connected! Running service tasks");
                         delay_ms(1000).await;
 
-                        let _ = join(gatt_split_events_handler(&conn_1, &server), async {
+                        let _ = select(gatt_split_events_handler(&conn_1, &server), async {
                             loop {
                                 // advertise to connect second central
                                 match advertise_hid(&mut peripheral, &server).await {
@@ -139,6 +138,8 @@ pub async fn ble_peripheral_run<RNG, S>(
                             }
                         })
                         .await;
+
+                        warn!("[split_adv] task ended");
                     }
                     Err(e) => {
                         error!("{}", e);
@@ -158,7 +159,7 @@ async fn advertise_split<'a, 'b>(
     let mut advertiser_data = [0; 31];
 
     #[cfg(feature = "debug")]
-    info!("[adv] creating adStructure");
+    info!("[split_adv] creating adStructure");
 
     AdStructure::encode_slice(
         &[
@@ -178,7 +179,7 @@ async fn advertise_split<'a, 'b>(
     };
 
     #[cfg(feature = "debug")]
-    info!("[adv] creating advertiser");
+    info!("[split_adv] creating advertiser");
 
     let advertiser = peripheral
         .advertise(
@@ -191,11 +192,11 @@ async fn advertise_split<'a, 'b>(
         .await?;
 
     #[cfg(feature = "debug")]
-    info!("[adv] advertising, waiting for connection...");
+    info!("[split_adv] advertising, waiting for connection...");
 
     let gatt_conn = advertiser.accept().await?.with_attribute_server(&server)?;
 
-    info!("[adv] connection established");
+    info!("[split_adv] connection established");
 
     Ok(gatt_conn)
 }
@@ -206,7 +207,7 @@ async fn advertise_hid<'a, 'b>(
     let mut advertiser_data = [0; 31];
 
     #[cfg(feature = "debug")]
-    info!("[adv] creating adStructure");
+    info!("[hid_adv] creating adStructure");
 
     AdStructure::encode_slice(
         &[
@@ -236,7 +237,7 @@ async fn advertise_hid<'a, 'b>(
     };
 
     #[cfg(feature = "debug")]
-    info!("[adv] creating advertiser");
+    info!("[hid_adv] creating advertiser");
 
     let advertiser = peripheral
         .advertise(
@@ -249,11 +250,11 @@ async fn advertise_hid<'a, 'b>(
         .await?;
 
     #[cfg(feature = "debug")]
-    info!("[adv] advertising, waiting for connection...");
+    info!("[hid_adv] advertising, waiting for connection...");
 
     let gatt_conn = advertiser.accept().await?.with_attribute_server(&server)?;
 
-    info!("[adv] connection established");
+    info!("[hid_adv] connection established");
 
     Ok(gatt_conn)
 }
@@ -270,19 +271,14 @@ async fn gatt_split_events_handler<'stack, 'server>(
 
     let reason = loop {
         match conn.next().await {
-            GattConnectionEvent::Disconnected { reason } => break reason,
+            GattConnectionEvent::Disconnected { reason } => {
+                break reason;
+            }
             GattConnectionEvent::PairingComplete {
                 security_level,
                 bond: _,
             } => {
                 info!("[gatt] pairing complete: {:?}", security_level);
-                // if let Some(bond) = bond {
-                // store_bonding_info(storage, &bond)
-                //     .await
-                //     .expect("[gatt] error storing bond info");
-                // *bond_stored = true;
-                // info!("[gatt] bond information stored");
-                // }
             }
             GattConnectionEvent::PairingFailed(err) => {
                 error!("[gatt] pairing error: {:?}", err);

@@ -26,9 +26,9 @@ use trouble_host::prelude::{DefaultPacketPool, Runner};
 
 use crate::peripherals::BlePeri;
 
-// #[cfg(feature = "central")]
+#[cfg(feature = "central")]
 mod central;
-// #[cfg(feature = "peripheral")]
+#[cfg(feature = "peripheral")]
 mod peripheral;
 mod services;
 
