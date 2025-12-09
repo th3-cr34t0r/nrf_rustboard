@@ -1,5 +1,3 @@
-use embassy_time::Duration;
-
 /// Rows per half
 pub const ROWS: usize = 4;
 /// Cols per half
