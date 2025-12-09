@@ -81,7 +81,8 @@ pub async fn store_bonding_info<S: NorFlash>(
 ) -> Result<(), sequential_storage::Error<S::Error>> {
     // start address
     let start_addr = 0xA0000 as u32;
-    let storage_range = start_addr..(start_addr + 8 * S::ERASE_SIZE as u32);
+    let number_of_sectors = 32 as u32;
+    let storage_range = start_addr..(start_addr + number_of_sectors * S::ERASE_SIZE as u32);
 
     info!(
         "[store_bonding_info] storage: {}kb, start_address: {}, storage_range: {}",
@@ -118,7 +119,8 @@ pub async fn store_bonding_info<S: NorFlash>(
 
 pub async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
     let start_addr = 0xA0000 as u32;
-    let storage_range = start_addr..(start_addr + 8 * S::ERASE_SIZE as u32);
+    let number_of_sectors = 32 as u32;
+    let storage_range = start_addr..(start_addr + number_of_sectors * S::ERASE_SIZE as u32);
 
     let mut buffer = [0; 32];
     let mut cache = NoCache::new();
