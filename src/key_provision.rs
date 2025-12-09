@@ -1,15 +1,9 @@
-use defmt::info;
 #[cfg(feature = "debug")]
 use defmt::{info, warn};
 #[cfg(feature = "peripheral")]
 use embassy_futures::select::{Either, select};
-use embassy_time::{Duration, Instant};
-use heapless::Vec;
 #[cfg(feature = "peripheral")]
 use usbd_hid::descriptor::KeyboardReport;
-
-#[cfg(feature = "central")]
-use crate::MESSAGE_TO_PERI;
 
 #[cfg(feature = "peripheral")]
 use crate::{
@@ -19,12 +13,17 @@ use crate::{
     keymap::provide_keymap,
 };
 
+#[cfg(feature = "central")]
+use crate::MESSAGE_TO_PERI;
+
 use crate::{
     MATRIX_KEYS_LOCAL,
     config::{MATRIX_KEYS_BUFFER, MATRIX_KEYS_COMB_BUFFER},
     keycodes::KC,
     matrix::{Key, KeyPos, KeyState},
 };
+use embassy_time::{Duration, Instant};
+use heapless::Vec;
 
 pub struct KeyProvision {
     #[cfg(feature = "peripheral")]
@@ -38,9 +37,6 @@ pub struct KeyProvision {
     #[cfg(feature = "central")]
     message_to_peri_local_old: [u8; 6],
 }
-
-#[cfg(feature = "debug")]
-use defmt::info;
 
 impl KeyProvision {
     pub fn init() -> Self {
@@ -62,12 +58,6 @@ impl KeyProvision {
     pub async fn provision_pressed_keys(&mut self, kc: &KC) {
         // get the key type
         match KeyType::check_type(kc) {
-            // KeyType::Combo => {
-            //     let (combo_valid_keys, _keys_to_remove) = Kc::get_combo(hid_key);
-            //     for valid_key in combo_valid_keys.iter() {
-            //         add_keys_master(keyboard_key_report, mouse_key_report, valid_key, layer);
-            //     }
-            // }
             // KeyType::Macro => {
             //     let macro_valid_keys = Kc::get_macro_sequence(hid_key);
             //     for valid_key in macro_valid_keys.iter() {
@@ -109,13 +99,6 @@ impl KeyProvision {
     async fn provision_released_keys(&mut self, kc: &KC) {
         // get the key type
         match KeyType::check_type(kc) {
-            //     KeyType::Combo => {
-            //         let (combo_valid_keys, _keys_to_change) = Kc::get_combo(hid_key);
-            //         for valid_key in combo_valid_keys.iter() {
-            //             remove_keys_master(keyboard_key_report, mouse_key_report, valid_key, layer);
-            //         }
-            //     }
-
             //     KeyType::Macro => {
             //         let macro_valid_keys = Kc::get_macro_sequence(hid_key);
             //         for valid_key in macro_valid_keys.iter() {
@@ -188,7 +171,7 @@ impl KeyProvision {
                             [key_pos_received.col as usize],
 
                         #[cfg(feature = "central")]
-                        code: KC::EU,
+                        code: KC::Reserved,
                         position: *key_pos_received,
                         state: KeyState::Pressed,
                         time: Instant::now(),
@@ -281,9 +264,9 @@ impl KeyProvision {
         }
     }
 
-    /// Provision the keys in case of modifiers, combos, macros etc.
+    /// Main provision loop
     pub async fn run(&mut self) {
-        let mut matrix_keys_local_receiver = MATRIX_KEYS_LOCAL
+        let mut matrix_keys_receiver = MATRIX_KEYS_LOCAL
             .receiver()
             .expect("[key_provision] unable to create matrix_key_local_receiver");
         #[cfg(feature = "peripheral")]
@@ -303,14 +286,14 @@ impl KeyProvision {
         loop {
             #[cfg(feature = "peripheral")]
             match select(
-                matrix_keys_local_receiver.changed(),
+                matrix_keys_receiver.changed(),
                 matrix_keys_split_receiver.changed(),
             )
             .await
             {
-                Either::First(matrix_keys_local_received) => {
+                Either::First(matrix_keys_received) => {
                     // transform the received local matrix keys
-                    self.matrix_to_hid_local(&mut matrix_keys_local, &matrix_keys_local_received)
+                    self.matrix_to_hid_local(&mut matrix_keys_local, &matrix_keys_received)
                         .await;
                 }
                 Either::Second(matrix_keys_split_received) => {
@@ -322,8 +305,8 @@ impl KeyProvision {
 
             #[cfg(feature = "central")]
             {
-                let matrix_keys_local_received = matrix_keys_local_receiver.changed().await;
-                self.matrix_to_hid_local(&mut matrix_keys_local, &matrix_keys_local_received)
+                let matrix_keys_received = matrix_keys_receiver.changed().await;
+                self.matrix_to_hid_local(&mut matrix_keys_local, &matrix_keys_received)
                     .await;
             }
 
@@ -331,12 +314,13 @@ impl KeyProvision {
             #[cfg(feature = "peripheral")]
             self.provision_combos(&mut matrix_keys_local).await;
 
-            // process the non default keys to keyreport
             #[cfg(feature = "debug")]
             info!(
                 "[key_provision] matrix_keys_local: {:#?}",
                 matrix_keys_local
             );
+
+            // process the non default keys to keyreport
             for key in matrix_keys_local
                 .iter_mut()
                 .filter(|key| key.code != KC::default())
@@ -422,12 +406,14 @@ impl KeyProvision {
             #[cfg(feature = "central")]
             {
                 if self.message_to_peri_local != self.message_to_peri_local_old {
-                    message_to_peri.send(self.message_to_peri_local);
                     #[cfg(feature = "debug")]
                     info!(
                         "[key_provision] message_to_peri_local: {:?}",
                         self.message_to_peri_local
                     );
+
+                    message_to_peri.send(self.message_to_peri_local);
+
                     self.message_to_peri_local_old = self.message_to_peri_local;
                 }
             }
