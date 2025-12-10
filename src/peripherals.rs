@@ -2,9 +2,9 @@ use embassy_nrf::{
     Peri,
     gpio::{Input, Level, Output, OutputDrive, Pull},
     peripherals::{
-        NVMC, PPI_CH17, PPI_CH18, PPI_CH19, PPI_CH20, PPI_CH21, PPI_CH22, PPI_CH23, PPI_CH24,
-        PPI_CH25, PPI_CH26, PPI_CH27, PPI_CH28, PPI_CH29, PPI_CH30, PPI_CH31, RNG, RTC0, TEMP,
-        TIMER0,
+        NVMC, P0_04, PPI_CH17, PPI_CH18, PPI_CH19, PPI_CH20, PPI_CH21, PPI_CH22, PPI_CH23,
+        PPI_CH24, PPI_CH25, PPI_CH26, PPI_CH27, PPI_CH28, PPI_CH29, PPI_CH30, PPI_CH31, RNG, RTC0,
+        SAADC, TEMP, TIMER0,
     },
 };
 
@@ -36,6 +36,8 @@ pub struct BlePeri {
 pub struct AppPeri<'a> {
     pub ble_peri: BlePeri,
     pub matrix_peri: Matrix<'a>,
+    pub p04: Peri<'a, P0_04>,
+    pub saadc: Peri<'a, SAADC>,
 }
 
 impl<'a> AppPeri<'a> {
@@ -87,9 +89,18 @@ impl<'a> AppPeri<'a> {
         // init matrix
         let matrix_peri = Matrix::init(rows, cols);
 
+        // set leds to low (off)
+        let _led = Output::new(p.P0_15, Level::Low, OutputDrive::Standard);
+        let _vcc = Output::new(p.P0_13, Level::Low, OutputDrive::Standard);
+
+        let p04 = p.P0_04;
+        let saadc = p.SAADC;
+
         Self {
             ble_peri,
             matrix_peri,
+            p04,
+            saadc,
         }
     }
 }
