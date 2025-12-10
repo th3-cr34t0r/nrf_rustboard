@@ -4,6 +4,7 @@ use embassy_nrf::mode::Async;
 
 use embassy_nrf::pac::FICR;
 use embassy_nrf::peripherals::RNG;
+use embassy_nrf::saadc;
 use embassy_nrf::{bind_interrupts, qspi, rng};
 use nrf_mpsl::raw::{
     MPSL_CLOCK_LF_SRC_RC, MPSL_DEFAULT_CLOCK_ACCURACY_PPM, MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED,
@@ -32,7 +33,7 @@ mod central;
 mod peripheral;
 mod services;
 
-bind_interrupts!(struct Irqs {
+bind_interrupts!(pub struct Irqs {
     RNG => rng::InterruptHandler<RNG>;
     EGU0_SWI0 => LowPrioInterruptHandler;
     CLOCK_POWER => ClockInterruptHandler;
@@ -40,6 +41,7 @@ bind_interrupts!(struct Irqs {
     TIMER0 => HighPrioInterruptHandler;
     RTC0 => HighPrioInterruptHandler;
     QSPI => qspi::InterruptHandler<embassy_nrf::peripherals::QSPI>;
+    SAADC => saadc::InterruptHandler;
 });
 
 /// How many outgoing L2CAP buffers per link
