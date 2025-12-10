@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+pub mod battery;
 pub mod ble;
 pub mod config;
 pub mod key_provision;
