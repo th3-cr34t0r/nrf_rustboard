@@ -22,7 +22,6 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
 
-use crate::MATRIX_KEYS_SPLIT;
 use crate::ble::ble_task;
 use crate::ble::get_device_address;
 use crate::ble::services::SPLIT_SERVICE;
@@ -31,6 +30,7 @@ use crate::config::COLS;
 use crate::config::MATRIX_KEYS_BUFFER;
 use crate::matrix::KeyPos;
 use crate::storage::{load_bonding_info, store_bonding_info};
+use crate::{BATTERY_PERCENT, MATRIX_KEYS_SPLIT};
 
 use ssmarshal::{self, serialize};
 
@@ -448,14 +448,24 @@ async fn battery_service_task<'stack, 'server>(
 ) {
     let battery_characteristic = server.battery_service.level;
 
-    let mut tick: u8 = 0;
+    let mut battery_percantage_receiver = BATTERY_PERCENT
+        .receiver()
+        .expect("[battery_service_task] failed to create receiver");
 
     loop {
-        tick = tick.wrapping_add(1);
-        match battery_characteristic.notify(conn, &tick).await {
+        // wait till the battery percentage is received
+        let battery_percentage = battery_percantage_receiver.changed().await;
+
+        match battery_characteristic
+            .notify(conn, &battery_percentage)
+            .await
+        {
             Ok(_) => {
                 #[cfg(feature = "debug")]
-                info!("[notify] battery level notified successfully");
+                info!(
+                    "[notify] battery level notified successfully: {}",
+                    battery_percentage
+                );
             }
             Err(e) => {
                 info!("[notify] battery level error: {}", e);
