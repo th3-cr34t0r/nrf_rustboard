@@ -24,7 +24,7 @@ async fn main(spawner: Spawner) {
         ble_init_run(p.ble_peri, spawner),
         p.matrix_peri.scan(),
         key_provision.run(),
-        battery.process(),
+        battery.measure(),
     )
     .await;
 }
