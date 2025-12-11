@@ -34,6 +34,9 @@ pub static MATRIX_KEYS_SPLIT: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEY
 /// Shared variable between ble and key provision tasks
 pub static MESSAGE_TO_PERI: Watch<CriticalSectionRawMutex, [u8; 6], 2> = Watch::new();
 
+/// Shared variable for battery percentage information
+pub static BATTERY_PERCENT: Watch<CriticalSectionRawMutex, u8, 2> = Watch::new();
+
 use embassy_time::{Duration, Timer};
 
 pub async fn delay_ms(delay: u64) {
