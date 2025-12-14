@@ -31,13 +31,13 @@ pub struct BlePeri {
     pub temp: Peri<'static, TEMP>,
     pub nvmc: Peri<'static, NVMC>,
     pub rng: Peri<'static, RNG>,
+    pub p_04: Peri<'static, P0_04>,
+    pub saadc: Peri<'static, SAADC>,
 }
 
 pub struct AppPeri<'a> {
     pub ble_peri: BlePeri,
     pub matrix_peri: Matrix<'a>,
-    pub p04: Peri<'a, P0_04>,
-    pub saadc: Peri<'a, SAADC>,
 }
 
 impl<'a> AppPeri<'a> {
@@ -67,6 +67,8 @@ impl<'a> AppPeri<'a> {
             temp: p.TEMP,
             nvmc: p.NVMC,
             rng: p.RNG,
+            p_04: p.P0_04,
+            saadc: p.SAADC,
         };
 
         // init rows
@@ -89,18 +91,9 @@ impl<'a> AppPeri<'a> {
         // init matrix
         let matrix_peri = Matrix::init(rows, cols);
 
-        // set leds to low (off)
-        let _led = Output::new(p.P0_15, Level::Low, OutputDrive::Standard);
-        let _vcc = Output::new(p.P0_13, Level::Low, OutputDrive::Standard);
-
-        let p04 = p.P0_04;
-        let saadc = p.SAADC;
-
         Self {
             ble_peri,
             matrix_peri,
-            p04,
-            saadc,
         }
     }
 }
