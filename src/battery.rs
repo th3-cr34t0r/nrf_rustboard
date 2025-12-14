@@ -7,53 +7,80 @@ use embassy_nrf::{
 
 use crate::{BATTERY_PERCENT, ble::Irqs, delay_ms};
 
-static ADC_VALUE_PERCENT_TABLE: [(u32, u8); 10] = [(0, 0); 10];
+static BAT_V_TO_PER_TABLE: [(u32, u8); 9] = [
+    (3500, 10),
+    (3570, 20),
+    (3640, 30),
+    (3710, 40),
+    (3780, 50),
+    (3850, 60),
+    (3920, 70),
+    (3990, 80),
+    (4160, 90),
+];
 
 pub struct Battery {
-    value: u8,
-    p_04: Peri<'static, P0_04>,
-    saadc: Peri<'static, SAADC>,
-    adc_value_percent: [(u32, u8); 10],
+    b_percent: u8,
+    milli_volts: u32,
+    saadc: Saadc<'static, 1>,
 }
 
 impl Battery {
-    pub fn new(p_04: Peri<'static, P0_04>, p_saadc: Peri<'static, SAADC>) -> Self {
+    pub fn new(mut p_04: Peri<'static, P0_04>, p_saadc: Peri<'static, SAADC>) -> Self {
+        let config = Config::default();
+        let channel_configs = ChannelConfig::single_ended(p_04.reborrow());
+
+        let saadc = Saadc::new(p_saadc, Irqs, config, [channel_configs]);
         Self {
-            value: 0,
-            p_04,
-            saadc: p_saadc,
-            adc_value_percent: ADC_VALUE_PERCENT_TABLE,
+            b_percent: 0,
+            milli_volts: 0,
+            saadc: saadc,
         }
     }
 
-    // async fn process_measurement(&self, buf: &[i16; 1]) -> u8 {
-    //     // do the calculation and send over BLE
-    //     0
-    // }
+    async fn volts_to_percent(&mut self) {
+        // do the calculation and send over BLE
+        info!("[battery_level] voltage: {}", self.milli_volts);
 
-    pub async fn measure(&mut self) {
-        // resolution = 12bit,
-        // oversample = bypass
-        let config = Config::default();
+        if self.milli_volts < 3500 {
+            self.b_percent = 0;
+        } else if self.milli_volts > 4160 {
+            self.b_percent = 100;
+        } else {
+            for (table_milli_v, table_percent) in BAT_V_TO_PER_TABLE.iter() {
+                if self.milli_volts < *table_milli_v {
+                    self.b_percent = *table_percent;
+                    break;
+                }
+            }
 
-        let channel_configs = ChannelConfig::single_ended(self.p_04.reborrow());
+            info!("[battery_level] percent: {}", self.b_percent);
+        }
+    }
 
-        let mut saadc = Saadc::new(self.saadc.reborrow(), Irqs, config, [channel_configs]);
-
-        saadc.calibrate().await;
+    pub async fn approximate(&mut self) {
+        self.saadc.calibrate().await;
+        let mut buf = [0; 1];
 
         let battery_percent_sender = BATTERY_PERCENT.sender();
 
-        let mut buf = [0; 1];
+        self.saadc.sample(&mut buf).await;
+        info!("[battery_level] sample: {}", buf[0]);
+
+        delay_ms(100).await;
 
         loop {
-            saadc.sample(&mut buf).await;
+            self.saadc.sample(&mut buf).await;
             info!("[battery_level] sample: {}", buf[0]);
-            // let battery_percent = self.process_measurement(&buf).await;
 
-            battery_percent_sender.send(self.value);
+            self.milli_volts = buf[0] as u32 * (68 * 600) / 4092;
 
-            delay_ms(1000).await;
+            self.volts_to_percent().await;
+
+            battery_percent_sender.send(self.b_percent);
+
+            // send battery level every 10mins
+            delay_ms(600000).await;
         }
     }
 }
