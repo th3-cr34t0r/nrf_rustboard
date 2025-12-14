@@ -163,7 +163,14 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     #[cfg(feature = "central")]
     crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng).await;
     #[cfg(feature = "peripheral")]
-    crate::ble::peripheral::ble_peripheral_run(sdc, &mut storage, &mut rng).await;
+    crate::ble::peripheral::ble_peripheral_run(
+        sdc,
+        &mut storage,
+        &mut rng,
+        ble_peri.p_04,
+        ble_peri.saadc,
+    )
+    .await;
 }
 
 pub fn get_device_address() -> Address {
