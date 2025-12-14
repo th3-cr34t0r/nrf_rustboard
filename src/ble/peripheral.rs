@@ -1,7 +1,11 @@
 use defmt::{error, info, warn};
 use embassy_futures::join::join;
-use embassy_futures::select::{select, select3};
+use embassy_futures::select::{select, select4};
 
+use embassy_nrf::{
+    Peri,
+    peripherals::{P0_04, SAADC},
+};
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::Error;
@@ -22,6 +26,7 @@ use trouble_host::prelude::{
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
 
+use crate::battery::Battery;
 use crate::ble::ble_task;
 use crate::ble::get_device_address;
 use crate::ble::services::SPLIT_SERVICE;
@@ -49,6 +54,8 @@ pub async fn ble_peripheral_run<RNG, S>(
     // mpsl: &'static MultiprotocolServiceLayer<'static>,
     mut storage: &mut S,
     rng: &mut RNG,
+    p_04: Peri<'static, P0_04>,
+    saadc: Peri<'static, SAADC>,
 ) where
     RNG: RngCore + CryptoRng,
     S: NorFlash,
@@ -96,6 +103,8 @@ pub async fn ble_peripheral_run<RNG, S>(
     }))
     .expect("Failed to create GATT Server");
 
+    let mut battery_level_sense = Battery::new(p_04, saadc);
+
     let _ = join(
         // backgroun task
         ble_task(runner),
@@ -118,7 +127,8 @@ pub async fn ble_peripheral_run<RNG, S>(
                                             .set_bondable(!bond_stored)
                                             .expect("[ble] error setting bondable");
 
-                                        let _ = select3(
+                                        let _ = select4(
+                                            battery_level_sense.approximate(),
                                             gatt_hid_events_handler(
                                                 &conn_2,
                                                 &server,
@@ -472,9 +482,6 @@ async fn battery_service_task<'stack, 'server>(
                 break;
             }
         }
-
-        // send notification every 1 minute
-        delay_ms(60000).await;
     }
 }
 
