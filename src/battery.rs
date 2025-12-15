@@ -64,17 +64,22 @@ impl Battery {
 
         let battery_percent_sender = BATTERY_PERCENT.sender();
 
-        self.saadc.sample(&mut buf).await;
-        info!("[battery_level] sample: {}", buf[0]);
+        delay_ms(1000).await;
 
-        delay_ms(100).await;
-
+        let mut avg_buf: i16;
         loop {
-            self.saadc.sample(&mut buf).await;
-            info!("[battery_level] sample: {}", buf[0]);
+            avg_buf = 0;
+
+            for i in 1..=10 {
+                self.saadc.sample(&mut buf).await;
+                avg_buf += buf[0] / i;
+
+                delay_ms(1000).await;
+            }
+            #[cfg(feature = "debug")]
+            info!("[battery_level] avg_sample: {}", buf[0]);
 
             self.milli_volts = buf[0] as u32 * (68 * 600) / 4092;
-
             self.volts_to_percent().await;
 
             battery_percent_sender.send(self.b_percent);
