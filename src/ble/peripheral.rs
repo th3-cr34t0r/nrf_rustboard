@@ -12,7 +12,6 @@ use nrf_sdc::Error;
 use nrf_sdc::SoftdeviceController;
 use rand::{CryptoRng, RngCore};
 use static_cell::StaticCell;
-use trouble_host::HostResources;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
@@ -25,6 +24,7 @@ use trouble_host::prelude::{
     Peripheral, appearance,
 };
 use trouble_host::{Address, BleHostError, Host, Stack};
+use trouble_host::{HostResources, IoCapabilities};
 
 use crate::battery::Battery;
 use crate::ble::ble_task;
@@ -76,7 +76,8 @@ pub async fn ble_peripheral_run<RNG, S>(
         STACK.init(
             trouble_host::new(sdc, resources)
                 .set_random_address(address)
-                .set_random_generator_seed(rng),
+                .set_random_generator_seed(rng)
+                .set_io_capabilities(IoCapabilities::NoInputNoOutput),
         )
     };
 
@@ -114,7 +115,6 @@ pub async fn ble_peripheral_run<RNG, S>(
                 match advertise_split(&mut peripheral, &server).await {
                     Ok(conn_1) => {
                         info!("[split_adv] Connected! Running service tasks");
-                        delay_ms(1000).await;
 
                         let _ = select(gatt_split_events_handler(&conn_1, &server), async {
                             loop {
@@ -179,12 +179,11 @@ async fn advertise_split<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
+    // let ad_params = AdvertisementParameters::default();
     let ad_params = AdvertisementParameters {
         primary_phy: PhyKind::Le2M,
         secondary_phy: PhyKind::Le2M,
-        tx_power: TxPower::Plus8dBm,
-        interval_min: Duration::from_millis(160),
-        interval_max: Duration::from_millis(160),
+        // tx_power: TxPower::Plus8dBm,
         ..Default::default()
     };
 
@@ -237,12 +236,14 @@ async fn advertise_hid<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
+    // let ad_params = AdvertisementParameters {
+    //     tx_power: TxPower::Plus8dBm,
+    //     ..Default::default()
+    // };
     let ad_params = AdvertisementParameters {
         primary_phy: PhyKind::Le2M,
         secondary_phy: PhyKind::Le2M,
-        tx_power: TxPower::Plus8dBm,
-        interval_min: Duration::from_millis(160),
-        interval_max: Duration::from_millis(160),
+        // tx_power: TxPower::Plus8dBm,
         ..Default::default()
     };
 
