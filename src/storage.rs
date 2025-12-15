@@ -5,6 +5,8 @@ use sequential_storage::map::{Key, SerializationError, Value, fetch_all_items};
 use trouble_host::prelude::{BdAddr, SecurityLevel};
 use trouble_host::{BondInformation, Identity, LongTermKey};
 
+const NUM_OF_SECTORS: u32 = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StoredAddr(BdAddr);
 
@@ -81,8 +83,7 @@ pub async fn store_bonding_info<S: NorFlash>(
 ) -> Result<(), sequential_storage::Error<S::Error>> {
     // start address
     let start_addr = 0xA0000 as u32;
-    let number_of_sectors = 32 as u32;
-    let storage_range = start_addr..(start_addr + number_of_sectors * S::ERASE_SIZE as u32);
+    let storage_range = start_addr..(start_addr + NUM_OF_SECTORS * S::ERASE_SIZE as u32);
 
     info!(
         "[store_bonding_info] storage: {}kb, start_address: {}, storage_range: {}",
@@ -119,8 +120,7 @@ pub async fn store_bonding_info<S: NorFlash>(
 
 pub async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
     let start_addr = 0xA0000 as u32;
-    let number_of_sectors = 32 as u32;
-    let storage_range = start_addr..(start_addr + number_of_sectors * S::ERASE_SIZE as u32);
+    let storage_range = start_addr..(start_addr + NUM_OF_SECTORS * S::ERASE_SIZE as u32);
 
     let mut buffer = [0; 32];
     let mut cache = NoCache::new();
