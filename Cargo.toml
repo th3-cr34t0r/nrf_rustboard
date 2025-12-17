@@ -5,25 +5,36 @@ edition = "2024"
 
 [features]
 default = []
-central = []
+central = ["trouble-host/scan"]
 peripheral = []
-debug = []
+defmt = [
+    "dep:defmt",
+    "embassy-executor/defmt",
+    "embassy-time/defmt",
+    "embassy-nrf/defmt",
+    "nrf-mpsl/defmt",
+    "nrf-sdc/defmt",
+    "trouble-host/defmt",
+    "panic-probe/print-defmt",
+    "nrf-sdc/defmt",
+    "nrf-sdc/defmt",
+]
 
 [dependencies]
-embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "defmt", "executor-thread", "executor-interrupt" ] }
-embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-nrf = { version = "0.8", features = ["defmt", "time-driver-rtc1", "gpiote", "unstable-pac", "time", "nrf52840" ] }
+embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt" ] }
+embassy-time = { version = "0.5.0" }
+embassy-nrf = { version = "0.8", features = ["time-driver-rtc1", "gpiote", "unstable-pac", "time", "nrf52840" ] }
 embassy-sync = "0.7.0"
 embassy-futures = "0.1.1"
 
-nrf-mpsl = { version = "0.3.0", features = ["defmt", "critical-section-impl"] }
-nrf-sdc = { version = "0.4.0", features = ["peripheral", "central","defmt", "nrf52840",] }
-trouble-host = { version = "0.5.0", features = ["derive", "defmt", "scan", "gatt", "central", "peripheral", "security"] }
+nrf-mpsl = { version = "0.3.0", features = ["critical-section-impl"] }
+nrf-sdc = { version = "0.4.0", features = ["peripheral", "central", "nrf52840"] }
+trouble-host = { version = "0.5.1", features = ["default", "security"] }
 
 embedded-storage-async = { version = "0.4.1"}
 sequential-storage = { version = "5.0.0" }
 
-defmt = "0.3.10"
+defmt = { version = "1.0", optional = true }
 defmt-rtt = "0.4.1"
 
 cortex-m = { version = "0.7.7" }
@@ -33,7 +44,7 @@ rand = { version = "0.8.5", default-features = false }
 rand_core = { version = "0.6"}
 rand_chacha = { version = "0.3", default-features = false }
 
-panic-probe = { version = "0.3.2", features = ["print-defmt"] }
+panic-probe = { version = "0.3.2" }
 usbd-hid = "0.8.2"
 static_cell = "2.1.1"
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
