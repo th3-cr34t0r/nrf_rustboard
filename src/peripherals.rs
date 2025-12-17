@@ -40,6 +40,12 @@ pub struct AppPeri<'a> {
     pub matrix_peri: Matrix<'a>,
 }
 
+impl<'a> Default for AppPeri<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> AppPeri<'a> {
     pub fn new() -> Self {
         // init peripherals

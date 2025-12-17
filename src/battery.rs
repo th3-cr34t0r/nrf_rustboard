@@ -1,3 +1,4 @@
+#[cfg(feature = "defmt")]
 use defmt::info;
 use embassy_nrf::{
     Peri,
@@ -34,11 +35,12 @@ impl Battery {
         Self {
             b_percent: 0,
             milli_volts: 0,
-            saadc: saadc,
+            saadc,
         }
     }
 
     async fn volts_to_percent(&mut self) {
+        #[cfg(feature = "defmt")]
         // do the calculation and send over BLE
         info!("[battery_level] voltage: {}", self.milli_volts);
 
@@ -54,6 +56,7 @@ impl Battery {
                 }
             }
 
+            #[cfg(feature = "defmt")]
             info!("[battery_level] percent: {}", self.b_percent);
         }
     }
@@ -66,9 +69,8 @@ impl Battery {
 
         delay_ms(1000).await;
 
-        let mut avg_buf: i16;
         loop {
-            avg_buf = 0;
+            let mut avg_buf = 0;
 
             for i in 1..=10 {
                 self.saadc.sample(&mut buf).await;
@@ -76,7 +78,7 @@ impl Battery {
 
                 delay_ms(1000).await;
             }
-            #[cfg(feature = "debug")]
+            #[cfg(feature = "defmt")]
             info!("[battery_level] avg_sample: {}", buf[0]);
 
             self.milli_volts = buf[0] as u32 * (68 * 600) / 4092;

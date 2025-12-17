@@ -3,16 +3,15 @@ use crate::keycodes::KC;
 use crate::{MATRIX_KEYS_LOCAL, delay_ms, delay_us};
 
 use core::pin::pin;
-use defmt::Format;
+#[cfg(feature = "defmt")]
+use defmt::{Format, info};
 use embassy_futures::select::{Either, select, select_slice};
 use embassy_nrf::gpio::{Input, Output};
 use embassy_time::Instant;
 use heapless::Vec;
 
-#[cfg(feature = "debug")]
-use defmt::info;
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Format)]
+#[cfg_attr(feature = "defmt", derive(Format))]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KeyPos {
     pub row: u8,
     pub col: u8,
@@ -24,14 +23,16 @@ impl KeyPos {
     }
 }
 
-#[derive(Default, PartialEq, Debug, Clone, Copy, Format)]
+#[cfg_attr(feature = "defmt", derive(Format))]
+#[derive(Default, PartialEq, Debug, Clone, Copy)]
 pub enum KeyState {
     #[default]
     Released,
     Pressed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Format)]
+#[cfg_attr(feature = "defmt", derive(Format))]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Key {
     pub code: KC,
     pub position: KeyPos,
@@ -155,9 +156,9 @@ impl<'a> Matrix<'a> {
 
             // send the new value
             if self.registered_keys_new != self.registered_keys_old {
-                #[cfg(feature = "debug")]
+                #[cfg(feature = "defmt")]
                 info!("[matrix] sent keys: {:?}", self.registered_keys_new);
-                matrix_keys_sender.send(self.registered_keys_new.clone());
+                matrix_keys_sender.send(self.registered_keys_new);
 
                 self.registered_keys_old = self.registered_keys_new;
             }

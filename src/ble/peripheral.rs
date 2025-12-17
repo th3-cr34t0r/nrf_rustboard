@@ -1,3 +1,4 @@
+#[cfg(feature = "defmt")]
 use defmt::{error, info, warn};
 use embassy_futures::join::join;
 use embassy_futures::select::{select, select4};
@@ -6,7 +7,6 @@ use embassy_nrf::{
     Peri,
     peripherals::{P0_04, SAADC},
 };
-use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::Error;
 use nrf_sdc::SoftdeviceController;
@@ -17,7 +17,6 @@ use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
 use trouble_host::prelude::AdvertisementParameters;
 use trouble_host::prelude::PhyKind;
-use trouble_host::prelude::TxPower;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
     AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
@@ -63,7 +62,7 @@ pub async fn ble_peripheral_run<RNG, S>(
     // ble address
     let address: Address = get_device_address();
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[ble] addrress: {}", address);
 
     let resources = {
@@ -84,9 +83,11 @@ pub async fn ble_peripheral_run<RNG, S>(
     // get the bond information
     let mut bond_stored = if let Some(bond_info) = load_bonding_info(storage).await {
         stack.add_bond_information(bond_info).unwrap();
+        #[cfg(feature = "defmt")]
         info!("[ble] loaded bond information");
         true
     } else {
+        #[cfg(feature = "defmt")]
         info!("[ble] no bond information found");
         false
     };
@@ -114,6 +115,7 @@ pub async fn ble_peripheral_run<RNG, S>(
             loop {
                 match advertise_split(&mut peripheral, &server).await {
                     Ok(conn_1) => {
+                        #[cfg(feature = "defmt")]
                         info!("[split_adv] Connected! Running service tasks");
 
                         let _ = select(gatt_split_events_handler(&conn_1, &server), async {
@@ -140,8 +142,9 @@ pub async fn ble_peripheral_run<RNG, S>(
                                         )
                                         .await;
                                     }
-                                    Err(e) => {
-                                        error!("{}", e);
+                                    Err(_e) => {
+                                        #[cfg(feature = "defmt")]
+                                        error!("{}", _e);
                                         delay_ms(1000).await;
                                     }
                                 }
@@ -149,10 +152,12 @@ pub async fn ble_peripheral_run<RNG, S>(
                         })
                         .await;
 
+                        #[cfg(feature = "defmt")]
                         warn!("[split_adv] task ended");
                     }
-                    Err(e) => {
-                        error!("{}", e);
+                    Err(_e) => {
+                        #[cfg(feature = "defmt")]
+                        error!("{}", _e);
                     }
                 }
             }
@@ -168,7 +173,7 @@ async fn advertise_split<'a, 'b>(
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
     let mut advertiser_data = [0; 31];
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[split_adv] creating adStructure");
 
     AdStructure::encode_slice(
@@ -187,7 +192,7 @@ async fn advertise_split<'a, 'b>(
         ..Default::default()
     };
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[split_adv] creating advertiser");
 
     let advertiser = peripheral
@@ -200,11 +205,12 @@ async fn advertise_split<'a, 'b>(
         )
         .await?;
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[split_adv] advertising, waiting for connection...");
 
-    let gatt_conn = advertiser.accept().await?.with_attribute_server(&server)?;
+    let gatt_conn = advertiser.accept().await?.with_attribute_server(server)?;
 
+    #[cfg(feature = "defmt")]
     info!("[split_adv] connection established");
 
     Ok(gatt_conn)
@@ -215,7 +221,7 @@ async fn advertise_hid<'a, 'b>(
 ) -> Result<GattConnection<'a, 'b, DefaultPacketPool>, BleHostError<Error>> {
     let mut advertiser_data = [0; 31];
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[hid_adv] creating adStructure");
 
     AdStructure::encode_slice(
@@ -247,7 +253,7 @@ async fn advertise_hid<'a, 'b>(
         ..Default::default()
     };
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[hid_adv] creating advertiser");
 
     let advertiser = peripheral
@@ -260,11 +266,12 @@ async fn advertise_hid<'a, 'b>(
         )
         .await?;
 
-    #[cfg(feature = "debug")]
+    #[cfg(feature = "defmt")]
     info!("[hid_adv] advertising, waiting for connection...");
 
-    let gatt_conn = advertiser.accept().await?.with_attribute_server(&server)?;
+    let gatt_conn = advertiser.accept().await?.with_attribute_server(server)?;
 
+    #[cfg(feature = "defmt")]
     info!("[hid_adv] connection established");
 
     Ok(gatt_conn)
@@ -280,7 +287,7 @@ async fn gatt_split_events_handler<'stack, 'server>(
     let matrix_keys_split_sender = MATRIX_KEYS_SPLIT.sender();
     let mut matrix_keys_split_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
 
-    let reason = loop {
+    let _reason = loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => {
                 break reason;
@@ -289,10 +296,12 @@ async fn gatt_split_events_handler<'stack, 'server>(
                 security_level,
                 bond: _,
             } => {
+                #[cfg(feature = "defmt")]
                 info!("[gatt] pairing complete: {:?}", security_level);
             }
-            GattConnectionEvent::PairingFailed(err) => {
-                error!("[gatt] pairing error: {:?}", err);
+            GattConnectionEvent::PairingFailed(_err) => {
+                #[cfg(feature = "defmt")]
+                error!("[gatt] pairing error: {:?}", _err);
             }
             GattConnectionEvent::Gatt { event } => {
                 match &event {
@@ -345,8 +354,9 @@ async fn gatt_split_events_handler<'stack, 'server>(
 
                 match event.accept() {
                     Ok(reply) => reply.send().await,
-                    Err(e) => {
-                        error!("error sending response {:?}", e)
+                    Err(_e) => {
+                        #[cfg(feature = "defmt")]
+                        error!("error sending response {:?}", _e)
                     }
                 };
             }
@@ -354,7 +364,8 @@ async fn gatt_split_events_handler<'stack, 'server>(
         }
     };
 
-    error!("Disconnected reason: {}", reason);
+    #[cfg(feature = "defmt")]
+    error!("Disconnected reason: {}", _reason);
     Ok(())
 }
 
@@ -368,34 +379,40 @@ async fn gatt_hid_events_handler<'stack, 'server, S: NorFlash>(
     let hid_service_report_map = server.hid_service.report_map;
     let battery_service_level = server.battery_service.level;
 
-    let reason = loop {
+    let _reason = loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => break reason,
             GattConnectionEvent::PairingComplete {
-                security_level,
+                security_level: _security_level,
                 bond,
             } => {
-                info!("[gatt] pairing complete: {:?}", security_level);
-                if let Some(bond) = bond {
-                    store_bonding_info(storage, &bond)
+                #[cfg(feature = "defmt")]
+                info!("[gatt] pairing complete: {:?}", _security_level);
+
+                if let Some(bond_info) = bond {
+                    store_bonding_info(storage, &bond_info)
                         .await
                         .expect("[gatt] error storing bond info");
                     *bond_stored = true;
+                    #[cfg(feature = "defmt")]
                     info!("[gatt] bond information stored");
                 }
             }
-            GattConnectionEvent::PairingFailed(err) => {
-                error!("[gatt] pairing error: {:?}", err);
+            GattConnectionEvent::PairingFailed(_err) => {
+                #[cfg(feature = "defmt")]
+                error!("[gatt] pairing error: {:?}", _err);
             }
             GattConnectionEvent::Gatt { event } => {
                 match &event {
                     GattEvent::Read(event) => {
                         if event.handle() == hid_service_report_map.handle {
-                            let value = server.get(&hid_service_report_map);
-                            info!("[gatt] Read Event to HID Characteristic: {:?}", value);
+                            let _value = server.get(&hid_service_report_map);
+                            #[cfg(feature = "defmt")]
+                            info!("[gatt] Read Event to HID Characteristic: {:?}", _value);
                         } else if event.handle() == battery_service_level.handle {
-                            let value = server.get(&battery_service_level);
-                            info!("[gatt] Read Event to Level Characteristic: {:?}", value);
+                            let _value = server.get(&battery_service_level);
+                            #[cfg(feature = "defmt")]
+                            info!("[gatt] Read Event to Level Characteristic: {:?}", _value);
                         }
 
                         if conn
@@ -411,11 +428,13 @@ async fn gatt_hid_events_handler<'stack, 'server, S: NorFlash>(
                     }
                     GattEvent::Write(event) => {
                         if event.handle() == hid_service_report_map.handle {
+                            #[cfg(feature = "defmt")]
                             info!(
                                 "[gatt] Write Event to HID Characteristic {:?}",
                                 event.data()
                             );
                         } else if event.handle() == battery_service_level.handle {
+                            #[cfg(feature = "defmt")]
                             info!(
                                 "[gatt] Write Event to Level Characteristic {:?}",
                                 event.data()
@@ -439,8 +458,9 @@ async fn gatt_hid_events_handler<'stack, 'server, S: NorFlash>(
 
                 match event.accept() {
                     Ok(reply) => reply.send().await,
-                    Err(e) => {
-                        error!("error sending response {:?}", e)
+                    Err(_e) => {
+                        #[cfg(feature = "defmt")]
+                        error!("error sending response {:?}", _e)
                     }
                 };
             }
@@ -448,7 +468,8 @@ async fn gatt_hid_events_handler<'stack, 'server, S: NorFlash>(
         }
     };
 
-    error!("Disconnected reason: {}", reason);
+    #[cfg(feature = "defmt")]
+    error!("Disconnected reason: {}", _reason);
     Ok(())
 }
 
@@ -472,14 +493,15 @@ async fn battery_service_task<'stack, 'server>(
             .await
         {
             Ok(_) => {
-                #[cfg(feature = "debug")]
+                #[cfg(feature = "defmt")]
                 info!(
                     "[notify] battery level notified successfully: {}",
                     battery_percentage
                 );
             }
-            Err(e) => {
-                info!("[notify] battery level error: {}", e);
+            Err(_e) => {
+                #[cfg(feature = "defmt")]
+                info!("[notify] battery level error: {}", _e);
                 break;
             }
         }
@@ -505,11 +527,12 @@ async fn hid_kb_service_task<'stack, 'server>(
 
         match server.hid_service.input_keyboard.notify(conn, &buff).await {
             Ok(_) => {
-                #[cfg(feature = "debug")]
+                #[cfg(feature = "defmt")]
                 info!("[notify] input keyboard notified successfully")
             }
-            Err(e) => {
-                info!("[notify] input keyboard error: {}", e);
+            Err(_e) => {
+                #[cfg(feature = "defmt")]
+                info!("[notify] input keyboard error: {}", _e);
                 break;
             }
         }

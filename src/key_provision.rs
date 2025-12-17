@@ -1,5 +1,5 @@
-#[cfg(feature = "debug")]
-use defmt::{info, warn};
+#[cfg(feature = "defmt")]
+use defmt::info;
 #[cfg(feature = "peripheral")]
 use embassy_futures::select::{Either, select};
 #[cfg(feature = "peripheral")]
@@ -133,7 +133,7 @@ impl KeyProvision {
         }
     }
 
-    /// Debounce the registered keys
+    // /// Debounce the registered keys
     // async fn debounce(&self, matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>) {
     //     let instant = Instant::now();
 
@@ -153,17 +153,16 @@ impl KeyProvision {
     ) {
         for (index_received, key_pos_received) in matrix_keys_received.iter().enumerate() {
             if *key_pos_received != KeyPos::default() {
-                #[cfg(feature = "debug")]
+                #[cfg(feature = "defmt")]
                 info!(
                     "[matrix_to_hid] matrix_keys_received: r{} c{}",
-                    key_pos.row, key_pos.col
+                    key_pos_received.row, key_pos_received.col
                 );
 
                 // if new key is not contained, add it
-                if None
-                    == matrix_keys_local
-                        .iter_mut()
-                        .find(|key| key.position == *key_pos_received)
+                if !matrix_keys_local
+                    .iter()
+                    .any(|key| key.position == *key_pos_received)
                 {
                     let key = Key {
                         #[cfg(feature = "peripheral")]
@@ -180,10 +179,8 @@ impl KeyProvision {
                     // set the new key in an empty slot
                     matrix_keys_local[index_received] = key;
                 }
-            } else {
-                if matrix_keys_local[index_received].position != KeyPos::default() {
-                    matrix_keys_local[index_received].state = KeyState::Released;
-                }
+            } else if matrix_keys_local[index_received].position != KeyPos::default() {
+                matrix_keys_local[index_received].state = KeyState::Released;
             }
         }
     }
@@ -197,17 +194,16 @@ impl KeyProvision {
         for (index_received, key_pos_received) in matrix_keys_received.iter().enumerate() {
             let index_received = index_received + MATRIX_KEYS_BUFFER;
             if *key_pos_received != KeyPos::default() {
-                #[cfg(feature = "debug")]
+                #[cfg(feature = "defmt")]
                 info!(
                     "[matrix_to_hid] matrix_keys_received: r{} c{}",
-                    key_pos.row, key_pos.col
+                    key_pos_received.row, key_pos_received.col
                 );
 
                 // if new key is not contained, add it
-                if None
-                    == matrix_keys_local
-                        .iter_mut()
-                        .find(|key| key.position == *key_pos_received)
+                if !matrix_keys_local
+                    .iter()
+                    .any(|key| key.position == *key_pos_received)
                 {
                     let key = Key {
                         code: self.keymap[self.layer as usize][key_pos_received.row as usize]
@@ -220,10 +216,8 @@ impl KeyProvision {
                     // set the new key in an empty slot
                     matrix_keys_local[index_received] = key;
                 }
-            } else {
-                if matrix_keys_local[index_received].position != KeyPos::default() {
-                    matrix_keys_local[index_received].state = KeyState::Released;
-                }
+            } else if matrix_keys_local[index_received].position != KeyPos::default() {
+                matrix_keys_local[index_received].state = KeyState::Released;
             }
         }
     }
@@ -314,7 +308,7 @@ impl KeyProvision {
             #[cfg(feature = "peripheral")]
             self.provision_combos(&mut matrix_keys_local).await;
 
-            #[cfg(feature = "debug")]
+            #[cfg(feature = "defmt")]
             info!(
                 "[key_provision] matrix_keys_local: {:#?}",
                 matrix_keys_local
@@ -338,14 +332,13 @@ impl KeyProvision {
                             // row and col must be lower than 16 (fit in 4 bits)
                             let key_to_send = (key.position.row << 4) | key.position.col;
 
-                            if !self.message_to_peri_local.contains(&key_to_send) {
-                                if let Some(index) = self
+                            if !self.message_to_peri_local.contains(&key_to_send)
+                                && let Some(index) = self
                                     .message_to_peri_local
                                     .iter_mut()
                                     .position(|key| *key == 255)
-                                {
-                                    self.message_to_peri_local[index] = key_to_send;
-                                }
+                            {
+                                self.message_to_peri_local[index] = key_to_send;
                             }
                         }
                     }
@@ -383,7 +376,7 @@ impl KeyProvision {
 
             // remove the released keys
             while let Some(key) = keys_to_remove.pop() {
-                #[cfg(feature = "debug")]
+                #[cfg(feature = "defmt")]
                 info!("[key_provision] keys_to_remove key: {}", key.code as u8);
                 if let Some(position) = matrix_keys_local
                     .iter()
@@ -395,18 +388,19 @@ impl KeyProvision {
 
             // send report
             #[cfg(feature = "peripheral")]
-            key_report_sender.send(self.keyreport_local);
+            {
+                key_report_sender.send(self.keyreport_local);
 
-            #[cfg(feature = "debug")]
-            info!(
-                "[key_provision] keyreport_local.keycodes: {:?}",
-                self.keyreport_local.keycodes
-            );
-
+                #[cfg(feature = "defmt")]
+                info!(
+                    "[key_provision] keyreport_local.keycodes: {:?}",
+                    self.keyreport_local.keycodes
+                );
+            }
             #[cfg(feature = "central")]
             {
                 if self.message_to_peri_local != self.message_to_peri_local_old {
-                    #[cfg(feature = "debug")]
+                    #[cfg(feature = "defmt")]
                     info!(
                         "[key_provision] message_to_peri_local: {:?}",
                         self.message_to_peri_local

@@ -1,3 +1,4 @@
+#[cfg(feature = "defmt")]
 use defmt::{info, warn};
 use embassy_futures::{join::join, select::select};
 use embassy_time::Duration;
@@ -61,36 +62,28 @@ pub async fn ble_central_run<RNG, S>(
     } = stack.build();
 
     let _ = join(ble_task(runner), async {
-        loop {
-            match connect(&mut central).await {
-                Ok(conn) => {
-                    // TODO: allow bonding
+        while let Ok(conn) = connect(&mut central).await {
+            // TODO: allow bonding
 
-                    info!("[ble_connect] connected to peripheral");
+            #[cfg(feature = "defmt")]
+            info!("[ble_connect] connected to peripheral");
 
-                    // create client
-                    let client = {
-                        static CLIENT: StaticCell<
-                            GattClient<'_, SoftdeviceController<'_>, DefaultPacketPool, 10>,
-                        > = StaticCell::new();
-                        CLIENT.init(
-                            GattClient::<SoftdeviceController, DefaultPacketPool, 10>::new(
-                                stack, &conn,
-                            )
-                            .await
-                            .expect("[ble_central] error creating client"),
-                        )
-                    };
+            // create client
+            let client = {
+                static CLIENT: StaticCell<
+                    GattClient<'_, SoftdeviceController<'_>, DefaultPacketPool, 10>,
+                > = StaticCell::new();
+                CLIENT.init(
+                    GattClient::<SoftdeviceController, DefaultPacketPool, 10>::new(stack, &conn)
+                        .await
+                        .expect("[ble_central] error creating client"),
+                )
+            };
 
-                    let _ = select(client.task(), split_keyboard_task(client)).await;
+            let _ = select(client.task(), split_keyboard_task(client)).await;
 
-                    warn!("[ble_connect] peripheral device disconnected");
-                }
-                Err(e) => {
-                    info!("[ble_central] error: {}", e);
-                    break;
-                }
-            }
+            #[cfg(feature = "defmt")]
+            warn!("[ble_connect] peripheral device disconnected");
         }
     })
     .await;
@@ -119,14 +112,16 @@ async fn connect<'a, 'b>(
         connect_params: conn_params,
     };
 
+    #[cfg(feature = "defmt")]
     // Connect to peripheral
     info!("[ble_connect] connecting to peripheral {}", target);
     loop {
         match central.connect(&config).await {
             Ok(conn) => return Ok(conn),
-            Err(e) => {
+            Err(_e) => {
+                #[cfg(feature = "defmt")]
                 // error connecting
-                info!("[ble_connect] error connecting: {}", e);
+                info!("[ble_connect] error connecting: {}", _e);
                 delay_ms(100).await;
             }
         }
@@ -152,6 +147,7 @@ async fn split_keyboard_task<'a>(
         .receiver()
         .expect(" [ble_peripheral] maximum number of receivers has been reached");
 
+    #[cfg(feature = "defmt")]
     info!("[ble_split_keyboard_task] running split_keyboard_task");
 
     loop {

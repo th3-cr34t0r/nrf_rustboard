@@ -1,3 +1,4 @@
+#[cfg(feature = "defmt")]
 use defmt::info;
 use embedded_storage_async::nor_flash::NorFlash;
 use sequential_storage::cache::NoCache;
@@ -82,9 +83,10 @@ pub async fn store_bonding_info<S: NorFlash>(
     bond_informaton: &BondInformation,
 ) -> Result<(), sequential_storage::Error<S::Error>> {
     // start address
-    let start_addr = 0xA0000 as u32;
+    let start_addr = 0xA0000_u32;
     let storage_range = start_addr..(start_addr + NUM_OF_SECTORS * S::ERASE_SIZE as u32);
 
+    #[cfg(feature = "defmt")]
     info!(
         "[store_bonding_info] storage: {}kb, start_address: {}, storage_range: {}",
         storage.capacity(),
@@ -94,6 +96,7 @@ pub async fn store_bonding_info<S: NorFlash>(
 
     sequential_storage::erase_all(storage, storage_range.clone()).await?;
 
+    #[cfg(feature = "defmt")]
     info!("[store_bonding_info] erased");
 
     let mut buffer = [0; 32];
@@ -113,13 +116,14 @@ pub async fn store_bonding_info<S: NorFlash>(
     )
     .await?;
 
+    #[cfg(feature = "defmt")]
     info!("[store_bonding_info] stored key-value");
 
     Ok(())
 }
 
 pub async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInformation> {
-    let start_addr = 0xA0000 as u32;
+    let start_addr = 0xA0000_u32;
     let storage_range = start_addr..(start_addr + NUM_OF_SECTORS * S::ERASE_SIZE as u32);
 
     let mut buffer = [0; 32];
@@ -130,7 +134,7 @@ pub async fn load_bonding_info<S: NorFlash>(storage: &mut S) -> Option<BondInfor
             .await
             .ok()?;
 
-    while let Some((key, value)) = iter.next::<StoredBondInformation>(&mut buffer).await.ok()? {
+    if let Some((key, value)) = iter.next::<StoredBondInformation>(&mut buffer).await.ok()? {
         return Some(BondInformation {
             ltk: value.ltk,
             identity: Identity {

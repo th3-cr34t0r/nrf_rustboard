@@ -1,3 +1,4 @@
+#[cfg(feature = "defmt")]
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_nrf::mode::Async;
@@ -54,7 +55,7 @@ const L2CAP_RXQ: u8 = 3;
 const L2CAP_MTU: usize = 72;
 
 /// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 6712; // bytes
+const SDC_MEMORY_SIZE: usize = 5016; // bytes
 
 #[embassy_executor::task]
 async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
@@ -65,6 +66,7 @@ async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
 pub async fn ble_task(
     mut runner: Runner<'static, SoftdeviceController<'static>, DefaultPacketPool>,
 ) {
+    #[cfg(feature = "defmt")]
     info!("[ble_task] running runner");
     loop {
         if let Err(e) = runner.run().await {
@@ -88,17 +90,22 @@ fn build_sdc<'a, const N: usize>(
     mpsl: &'a MultiprotocolServiceLayer,
     mem: &'a mut sdc::Mem<N>,
 ) -> Result<SoftdeviceController<'a>, nrf_sdc::Error> {
-    sdc::Builder::new()?
-        .support_scan()?
-        .support_central()?
-        .support_adv()?
-        .support_peripheral()?
-        .central_count(1)?
-        .peripheral_count(2)?
-        .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
-        .build(p, rng, mpsl, mem)
+    if cfg!(feature = "central") {
+        sdc::Builder::new()?
+            .support_scan()?
+            .support_central()?
+            .central_count(1)?
+            .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
+            .build(p, rng, mpsl, mem)
+    } else {
+        sdc::Builder::new()?
+            .support_adv()?
+            .support_peripheral()?
+            .peripheral_count(2)?
+            .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
+            .build(p, rng, mpsl, mem)
+    }
 }
-
 pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     let sdc_p = sdc_Peripherals::new(
         ble_peri.ppi_ch17,

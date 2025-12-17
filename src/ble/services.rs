@@ -19,7 +19,7 @@ pub(crate) struct Server {
 pub(crate) struct BatteryService {
     #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
     #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
-    #[characteristic(uuid = BATTERY_LEVEL, read, notify, value = 10)]
+    #[characteristic(uuid = BATTERY_LEVEL, read, notify, value = 0)]
     pub(crate) level: u8,
     #[characteristic(uuid = BATTERY_LEVEL_STATUS, write, read, notify)]
     status: bool,
