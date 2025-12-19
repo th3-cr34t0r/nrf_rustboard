@@ -164,11 +164,10 @@ impl<'a> Matrix<'a> {
                         };
 
                         // add the new key position only if it is not contained
-                        if self
+                        if !self
                             .reg_keys
                             .iter()
-                            .find(|c_key| c_key.keypos == new_m_key.keypos)
-                            .is_none()
+                            .any(|c_key| c_key.keypos == new_m_key.keypos)
                         {
                             // add it to a free slot
                             if let Some(index) = self
@@ -180,14 +179,12 @@ impl<'a> Matrix<'a> {
                             };
                         }
                         // update its time
-                        else {
-                            if let Some(index) = self
-                                .reg_keys
-                                .iter()
-                                .position(|c_key| c_key.keypos == new_m_key.keypos)
-                            {
-                                self.reg_keys[index].time = Instant::now();
-                            }
+                        else if let Some(index) = self
+                            .reg_keys
+                            .iter()
+                            .position(|c_key| c_key.keypos == new_m_key.keypos)
+                        {
+                            self.reg_keys[index].time = Instant::now();
                         }
                     }
                 }
