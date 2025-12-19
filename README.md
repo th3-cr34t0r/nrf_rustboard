@@ -8,8 +8,9 @@ will generate 2 .uf2 file, one peripheral one central
 
 TODO:
 - Central connection to be improved - (kinda improved it, need to turn on the central split, then the peripheral in order to connect correctly)
-- ~~Enter bootloader more easily~~ - bootloader is entered when key row:0, col:0 is held and released after 5s
-- ~~Introduce combos feature~~ - Combo feature introduced, altho setup needs to be polished. 
 - Introduce macros feature 
-- Solder battery and a power-switch
-- Battery level readings (saadc) feature
+- ~~Enter bootloader more easily~~ - bootloader is entered when key row:0, col:0 is held and released after 5s
+- ~~Introduce combos feature~~ - done 
+- ~~Solder battery and a power-switch~~ - done 
+- ~~Battery level readings (saadc) feature~~ - done
+- ~~Introduce a debounce feature for the matrix (sometimes with the current approach, some keys are registered 2 times)~~ - done
