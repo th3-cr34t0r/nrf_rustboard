@@ -133,19 +133,6 @@ impl KeyProvision {
         }
     }
 
-    // /// Debounce the registered keys
-    // async fn debounce(&self, matrix_keys_local: &mut Vec<Key, MATRIX_KEYS_BUFFER>) {
-    //     let instant = Instant::now();
-
-    //     for key in matrix_keys_local.iter_mut() {
-    //         if instant >= key.time + KEY_DEBOUNCE {
-    //             #[cfg(feature = "debug")]
-    //             info!("[debounce] debounced key: {}", key.code as u8);
-    //             key.state = KeyState::Released;
-    //         }
-    //     }
-    // }
-
     async fn matrix_to_hid_local(
         &self,
         matrix_keys_local: &mut [Key; MATRIX_KEYS_COMB_BUFFER],
