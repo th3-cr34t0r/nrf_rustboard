@@ -1,5 +1,4 @@
 use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, KEY_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
-use crate::key_provision::KeyProvision;
 use crate::keycodes::KC;
 use crate::{MATRIX_KEYS_LOCAL, delay_ms, delay_us};
 
