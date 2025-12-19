@@ -1,4 +1,5 @@
-use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
+use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, KEY_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
+use crate::key_provision::KeyProvision;
 use crate::keycodes::KC;
 use crate::{MATRIX_KEYS_LOCAL, delay_ms, delay_us};
 
@@ -51,11 +52,28 @@ impl Default for Key {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(Format))]
+#[derive(Copy, Clone, PartialEq)]
+struct MatrixKey {
+    keypos: KeyPos,
+    time: Instant,
+}
+
+impl Default for MatrixKey {
+    fn default() -> Self {
+        Self {
+            keypos: KeyPos::default(),
+            time: Instant::now(),
+        }
+    }
+}
+
 pub struct Matrix<'a> {
     rows: [Output<'a>; ROWS],
     cols: [Input<'a>; COLS],
-    registered_keys_new: [KeyPos; MATRIX_KEYS_BUFFER],
-    registered_keys_old: [KeyPos; MATRIX_KEYS_BUFFER],
+    reg_keys: [MatrixKey; MATRIX_KEYS_BUFFER],
+    keys_to_send_new: [KeyPos; MATRIX_KEYS_BUFFER],
+    keys_to_send_old: [KeyPos; MATRIX_KEYS_BUFFER],
 }
 
 impl<'a> Matrix<'a> {
@@ -63,8 +81,26 @@ impl<'a> Matrix<'a> {
         Self {
             rows,
             cols,
-            registered_keys_new: [KeyPos::default(); MATRIX_KEYS_BUFFER],
-            registered_keys_old: [KeyPos::default(); MATRIX_KEYS_BUFFER],
+            reg_keys: [MatrixKey::default(); MATRIX_KEYS_BUFFER],
+            keys_to_send_new: [KeyPos::default(); MATRIX_KEYS_BUFFER],
+            keys_to_send_old: [KeyPos::default(); MATRIX_KEYS_BUFFER],
+        }
+    }
+
+    /// Debounce the registered keys
+    async fn debouncer(&mut self) {
+        let instant = Instant::now();
+
+        for c_key in self
+            .reg_keys
+            .iter_mut()
+            .filter(|c_key| c_key.keypos != KeyPos::default())
+        {
+            if instant >= c_key.time + KEY_DEBOUNCE {
+                #[cfg(feature = "defmt")]
+                info!("[debounce] debounced key: {:?}", c_key.keypos);
+                c_key.keypos = KeyPos::default();
+            }
         }
     }
 
@@ -74,9 +110,9 @@ impl<'a> Matrix<'a> {
 
         loop {
             if self
-                .registered_keys_new
+                .reg_keys
                 .iter()
-                .all(|key_pos| *key_pos == KeyPos::default())
+                .all(|m_key| m_key.keypos == KeyPos::default())
             {
                 for row in self.rows.iter_mut() {
                     row.set_high();
@@ -114,53 +150,73 @@ impl<'a> Matrix<'a> {
             for (row_count, row) in self.rows.iter_mut().enumerate() {
                 row.set_high();
                 // delay so port propagates
-                delay_us(250).await;
+                delay_us(10).await;
 
                 // get the pressed keys
                 for (col_count, col) in self.cols.iter().enumerate() {
                     if col.is_high() {
-                        let new_key_position = KeyPos {
-                            row: row_count as u8,
-                            col: col_count as u8,
+                        let new_m_key = MatrixKey {
+                            keypos: KeyPos {
+                                row: row_count as u8,
+                                col: col_count as u8,
+                            },
+
+                            time: Instant::now(),
                         };
 
                         // add the new key position only if it is not contained
-                        if !self.registered_keys_new.contains(&new_key_position) {
+                        if self
+                            .reg_keys
+                            .iter()
+                            .find(|c_key| c_key.keypos == new_m_key.keypos)
+                            .is_none()
+                        {
                             // add it to a free slot
                             if let Some(index) = self
-                                .registered_keys_new
+                                .reg_keys
                                 .iter()
-                                .position(|&key_pos| key_pos == KeyPos::default())
+                                .position(|&key_pos| key_pos.keypos == KeyPos::default())
                             {
-                                self.registered_keys_new[index] = new_key_position;
+                                self.reg_keys[index] = new_m_key;
                             };
                         }
-                    } else {
-                        let new_key_position = KeyPos {
-                            row: row_count as u8,
-                            col: col_count as u8,
-                        };
-                        if let Some(index) = self
-                            .registered_keys_new
-                            .iter()
-                            .position(|key_pos| *key_pos == new_key_position)
-                        {
-                            self.registered_keys_new[index] = KeyPos::default();
+                        // update its time
+                        else {
+                            if let Some(index) = self
+                                .reg_keys
+                                .iter()
+                                .position(|c_key| c_key.keypos == new_m_key.keypos)
+                            {
+                                self.reg_keys[index].time = Instant::now();
+                            }
                         }
                     }
                 }
 
                 // set row to low
                 row.set_low();
+
+                // we aim at 1ms scan interval per scan
+                delay_us(1000 / ROWS as u64).await;
+            }
+
+            // debouncer
+            self.debouncer().await;
+
+            // filter all non defalut KeyPos elements
+            for (index, c_key) in self.reg_keys.iter().enumerate() {
+                self.keys_to_send_new[index] = c_key.keypos;
             }
 
             // send the new value
-            if self.registered_keys_new != self.registered_keys_old {
+            if self.keys_to_send_new != self.keys_to_send_old {
                 #[cfg(feature = "defmt")]
-                info!("[matrix] sent keys: {:?}", self.registered_keys_new);
-                matrix_keys_sender.send(self.registered_keys_new);
+                info!("[matrix] sent keys: {:?}", self.keys_to_send_new);
 
-                self.registered_keys_old = self.registered_keys_new;
+                // send the keys
+                matrix_keys_sender.send(self.keys_to_send_new);
+
+                self.keys_to_send_old = self.keys_to_send_new;
             }
         }
     }
