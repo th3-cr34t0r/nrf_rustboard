@@ -1,12 +1,12 @@
 [package]
 name = "nrf_rustboard"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 
 [features]
 default = []
-central = ["trouble-host/scan"]
-peripheral = []
+central = ["trouble-host/scan", "nrf-sdc/central"]
+peripheral = ["nrf-sdc/peripheral"]
 defmt = [
     "dep:defmt",
     "embassy-executor/defmt",
@@ -28,7 +28,7 @@ embassy-sync = "0.7.0"
 embassy-futures = "0.1.1"
 
 nrf-mpsl = { version = "0.3.0", features = ["critical-section-impl"] }
-nrf-sdc = { version = "0.4.0", features = ["peripheral", "central", "nrf52840"] }
+nrf-sdc = { version = "0.4.0", features = ["nrf52840"] }
 trouble-host = { version = "0.5.1", features = ["default", "security"] }
 
 embedded-storage-async = { version = "0.4.1"}
