@@ -192,7 +192,7 @@ impl<'a> Matrix<'a> {
                 // set row to low
                 row.set_low();
 
-                // we aim at 1ms scan interval per scan
+                // we aim at 1ms scan interval
                 delay_us(1000 / ROWS as u64).await;
             }
 
