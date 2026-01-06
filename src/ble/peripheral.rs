@@ -15,13 +15,13 @@ use static_cell::StaticCell;
 use trouble_host::att::AttErrorCode;
 use trouble_host::gap::{GapConfig, PeripheralConfig};
 use trouble_host::gatt::{GattConnection, GattConnectionEvent, GattEvent};
-use trouble_host::prelude::AdvertisementParameters;
 use trouble_host::prelude::PhyKind;
 use trouble_host::prelude::service::{BATTERY, HUMAN_INTERFACE_DEVICE};
 use trouble_host::prelude::{
     AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, DefaultPacketPool, LE_GENERAL_DISCOVERABLE,
     Peripheral, appearance,
 };
+use trouble_host::prelude::{AdvertisementParameters, TxPower};
 use trouble_host::{Address, BleHostError, Host, Stack};
 use trouble_host::{HostResources, IoCapabilities};
 
@@ -184,11 +184,10 @@ async fn advertise_split<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
-    // let ad_params = AdvertisementParameters::default();
     let ad_params = AdvertisementParameters {
         primary_phy: PhyKind::Le2M,
         secondary_phy: PhyKind::Le2M,
-        // tx_power: TxPower::Plus8dBm,
+        tx_power: TxPower::Plus8dBm,
         ..Default::default()
     };
 
@@ -242,14 +241,10 @@ async fn advertise_hid<'a, 'b>(
         &mut advertiser_data[..],
     )?;
 
-    // let ad_params = AdvertisementParameters {
-    //     tx_power: TxPower::Plus8dBm,
-    //     ..Default::default()
-    // };
     let ad_params = AdvertisementParameters {
         primary_phy: PhyKind::Le2M,
         secondary_phy: PhyKind::Le2M,
-        // tx_power: TxPower::Plus8dBm,
+        tx_power: TxPower::Plus8dBm,
         ..Default::default()
     };
 
