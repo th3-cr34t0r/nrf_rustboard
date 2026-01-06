@@ -52,10 +52,10 @@ const L2CAP_TXQ: u8 = 3;
 const L2CAP_RXQ: u8 = 3;
 
 /// Size of L2CAP packets
-const L2CAP_MTU: usize = 72;
+const L2CAP_MTU: usize = 251;
 
 /// Default memory allocation for softdevice controller in bytes.
-const SDC_MEMORY_SIZE: usize = 5016; // bytes
+const SDC_MEMORY_SIZE: usize = 5080; // bytes
 
 #[embassy_executor::task]
 async fn mpsl_task(mpsl: &'static MultiprotocolServiceLayer<'static>) -> ! {
@@ -94,6 +94,8 @@ fn build_sdc<'a, const N: usize>(
         sdc::Builder::new()?
             .support_scan()?
             .support_central()?
+            .support_le_2m_phy()?
+            .support_phy_update_central()?
             .central_count(1)?
             .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
             .build(p, rng, mpsl, mem)
@@ -101,6 +103,8 @@ fn build_sdc<'a, const N: usize>(
         sdc::Builder::new()?
             .support_adv()?
             .support_peripheral()?
+            .support_le_2m_phy()?
+            .support_phy_update_peripheral()?
             .peripheral_count(2)?
             .buffer_cfg(L2CAP_MTU as u16, L2CAP_MTU as u16, L2CAP_TXQ, L2CAP_RXQ)?
             .build(p, rng, mpsl, mem)
