@@ -6,7 +6,7 @@ use embassy_nrf::{
     saadc::{ChannelConfig, Config, Saadc},
 };
 
-use crate::{BATTERY_PERCENT, ble::Irqs, delay_ms};
+use crate::{BATTERY_LEVEL, ble::Irqs, delay_ms};
 
 static BAT_V_TO_PER_TABLE: [(u32, u8); 9] = [
     (3500, 10),
@@ -55,17 +55,16 @@ impl Battery {
                     break;
                 }
             }
-
-            #[cfg(feature = "defmt")]
-            info!("[battery_level] percent: {}", self.b_percent);
         }
+        #[cfg(feature = "defmt")]
+        info!("[battery_level] battery: {}%", self.b_percent);
     }
 
     pub async fn approximate(&mut self) {
         self.saadc.calibrate().await;
         let mut buf = [0; 1];
 
-        let battery_percent_sender = BATTERY_PERCENT.sender();
+        let battery_percent_sender = BATTERY_LEVEL.sender();
 
         delay_ms(1000).await;
 
@@ -78,6 +77,7 @@ impl Battery {
 
                 delay_ms(1000).await;
             }
+
             #[cfg(feature = "defmt")]
             info!("[battery_level] avg_sample: {}", buf[0]);
 
