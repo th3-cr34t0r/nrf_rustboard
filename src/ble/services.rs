@@ -4,9 +4,12 @@ use trouble_host::prelude::{
 };
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
-/// Custom service for the split peripheral
+/// Custom service for the split device
 pub const SPLIT_SERVICE: BluetoothUuid16 = BluetoothUuid16::new(0xff11);
+
+/// Custom characteristics for the split device
 pub const SPLIT_REPORT_CH: BluetoothUuid16 = BluetoothUuid16::new(0xff22);
+pub const SPLIT_BATTERY_CH: BluetoothUuid16 = BluetoothUuid16::new(0xff33);
 
 #[gatt_server(cccd_table_size = 8, connections_max = 2)]
 pub(crate) struct Server {
@@ -18,7 +21,7 @@ pub(crate) struct Server {
 #[gatt_service(uuid = service::BATTERY)]
 pub(crate) struct BatteryService {
     #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
-    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
+    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "battery_level", read, value = "Battery Level")]
     #[characteristic(uuid = BATTERY_LEVEL, read, notify, value = 0)]
     pub(crate) level: u8,
     #[characteristic(uuid = BATTERY_LEVEL_STATUS, write, read, notify)]
@@ -36,7 +39,7 @@ pub(crate) struct HidService {
     pub(crate) protocol_mode: u8,
     #[descriptor(uuid = "2908", read, value = [0u8, 1u8])]
     #[characteristic(uuid = "2a4d", read, notify)]
-    pub(crate) input_keyboard: [u8; 8],
+    pub(crate) report: [u8; 8],
     #[descriptor(uuid = "2908", read, value = [0u8, 2u8])]
     #[characteristic(uuid = "2a4d", read, write, write_without_response)]
     pub(crate) output_keyboard: [u8; 1],
@@ -44,6 +47,10 @@ pub(crate) struct HidService {
 
 #[gatt_service(uuid = SPLIT_SERVICE)]
 pub(crate) struct SplitService {
-    #[characteristic(uuid = SPLIT_REPORT_CH, read, write, notify)]
+    #[characteristic(uuid = SPLIT_REPORT_CH, read, notify)]
     pub(crate) registered_keys: [u8; 6],
+    #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
+    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "battery_level", read, value = "Battery Level")]
+    #[characteristic(uuid = SPLIT_BATTERY_CH, read, notify, value = 0)]
+    pub(crate) level: u8,
 }
