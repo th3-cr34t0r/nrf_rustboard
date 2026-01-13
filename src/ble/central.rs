@@ -1,6 +1,13 @@
 #[cfg(feature = "defmt")]
 use defmt::{info, warn};
-use embassy_futures::{join::join, select::select};
+use embassy_futures::{
+    join::join,
+    select::{select, select3},
+};
+use embassy_nrf::{
+    Peri,
+    peripherals::{P0_04, SAADC},
+};
 use embassy_time::Duration;
 use embedded_storage_async::nor_flash::NorFlash;
 use nrf_sdc::{Error, SoftdeviceController};
@@ -15,7 +22,7 @@ use trouble_host::{
     },
 };
 
-use crate::MESSAGE_TO_PERI;
+use crate::{BATTERY_LEVEL, MESSAGE_TO_PERI, battery::Battery};
 
 use crate::{
     ble::{ble_task, get_device_address},
@@ -34,6 +41,8 @@ pub async fn ble_central_run<RNG, S>(
     sdc: SoftdeviceController<'static>,
     mut _storage: &mut S,
     rng: &mut RNG,
+    p_04: Peri<'static, P0_04>,
+    saadc: Peri<'static, SAADC>,
 ) where
     RNG: RngCore + CryptoRng,
     S: NorFlash,
@@ -61,6 +70,8 @@ pub async fn ble_central_run<RNG, S>(
         ..
     } = stack.build();
 
+    let mut battery_level_sense = Battery::new(p_04, saadc);
+
     let _ = join(ble_task(runner), async {
         while let Ok(conn) = connect(&mut central).await {
             // TODO: allow bonding
@@ -80,7 +91,12 @@ pub async fn ble_central_run<RNG, S>(
                 )
             };
 
-            let _ = select(client.task(), split_keyboard_task(client)).await;
+            let _ = select3(
+                client.task(),
+                kb_tasks(client),
+                battery_level_sense.approximate(),
+            )
+            .await;
 
             #[cfg(feature = "defmt")]
             warn!("[ble_connect] peripheral device disconnected");
@@ -128,9 +144,8 @@ async fn connect<'a, 'b>(
     }
 }
 
-async fn split_keyboard_task<'a>(
-    client: &'a GattClient<'a, SoftdeviceController<'a>, DefaultPacketPool, 10>,
-) {
+/// Keyboard Tasks
+async fn kb_tasks<'a>(client: &'a GattClient<'a, SoftdeviceController<'a>, DefaultPacketPool, 10>) {
     let services = client
         .services_by_uuid(&Uuid::new_short(0xff11))
         .await
@@ -138,26 +153,89 @@ async fn split_keyboard_task<'a>(
 
     let service = services.first().unwrap().clone();
 
-    let characteristic: Characteristic<[u8; 6]> = client
+    let keyboard_characteristic: Characteristic<[u8; 6]> = client
         .characteristic_by_uuid(&service, &Uuid::new_short(0xff22))
         .await
         .expect("[ble_central] unable to set characteristic");
 
+    let battery_characteristic: Characteristic<u8> = client
+        .characteristic_by_uuid(&service, &Uuid::new_short(0xff33))
+        .await
+        .expect("[ble_central] unable to set characteristic");
+
+    let _ = select(
+        split_keyboard_task(client, &keyboard_characteristic),
+        split_battery_task(client, &battery_characteristic),
+    )
+    .await;
+}
+
+/// Battery service task
+async fn split_battery_task<'a>(
+    client: &'a GattClient<'a, SoftdeviceController<'a>, DefaultPacketPool, 10>,
+    characteristic: &Characteristic<u8>,
+) {
+    #[cfg(feature = "defmt")]
+    info!("[ble_split_battery_task] running split_battery_task");
+
+    let mut battery_percantage_receiver = BATTERY_LEVEL
+        .receiver()
+        .expect("[battery_service_task] failed to create receiver");
+
+    loop {
+        // wait till the battery percentage is received
+        let battery_level = battery_percantage_receiver.changed().await;
+
+        match client
+            .write_characteristic_without_response(characteristic, &[battery_level])
+            .await
+        {
+            Ok(_) => {
+                #[cfg(feature = "defmt")]
+                info!(
+                    "[notify] battery level notified successfully: {}",
+                    battery_level
+                );
+            }
+            Err(_e) => {
+                #[cfg(feature = "defmt")]
+                info!("[notify] battery level error: {}", _e);
+                break;
+            }
+        };
+    }
+}
+
+/// Split Keyboard service task
+async fn split_keyboard_task<'a>(
+    client: &'a GattClient<'a, SoftdeviceController<'a>, DefaultPacketPool, 10>,
+    characteristic: &Characteristic<[u8; 6]>,
+) {
+    #[cfg(feature = "defmt")]
+    info!("[ble_split_keyboard_task] running split_keyboard_task");
+
     let mut message_to_peri = MESSAGE_TO_PERI
         .receiver()
         .expect(" [ble_peripheral] maximum number of receivers has been reached");
-
-    #[cfg(feature = "defmt")]
-    info!("[ble_split_keyboard_task] running split_keyboard_task");
 
     loop {
         // wait till new key_report is received from key_provision
         let message: [u8; 6] = message_to_peri.changed().await;
 
         // write to characteristic
-        client
+        match client
             .write_characteristic_without_response(&characteristic, &message)
             .await
-            .expect("[ble_central] error sending message to peri");
+        {
+            Ok(_) => {
+                #[cfg(feature = "defmt")]
+                info!("[ble_split_keyboard_task] sent:{:?}", message);
+            }
+            Err(_e) => {
+                #[cfg(feature = "defmt")]
+                info!("[ble_split_keyboard_task] notify error: {}", _e);
+                break;
+            }
+        };
     }
 }
