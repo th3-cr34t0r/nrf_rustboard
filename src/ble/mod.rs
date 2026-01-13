@@ -54,6 +54,10 @@ const L2CAP_RXQ: u8 = 3;
 /// Size of L2CAP packets
 const L2CAP_MTU: usize = 251;
 
+#[cfg(feature = "central")]
+/// Default memory allocation for softdevice controller in bytes.
+const SDC_MEMORY_SIZE: usize = 2816; // bytes
+#[cfg(feature = "peripheral")]
 /// Default memory allocation for softdevice controller in bytes.
 const SDC_MEMORY_SIZE: usize = 5080; // bytes
 
@@ -172,7 +176,14 @@ pub async fn ble_init_run(ble_peri: BlePeri, spawner: Spawner) {
     spawner.must_spawn(mpsl_task(mpsl));
 
     #[cfg(feature = "central")]
-    crate::ble::central::ble_central_run(sdc, &mut storage, &mut rng).await;
+    crate::ble::central::ble_central_run(
+        sdc,
+        &mut storage,
+        &mut rng,
+        ble_peri.p_04,
+        ble_peri.saadc,
+    )
+    .await;
     #[cfg(feature = "peripheral")]
     crate::ble::peripheral::ble_peripheral_run(
         sdc,
