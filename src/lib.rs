@@ -35,7 +35,7 @@ pub static MATRIX_KEYS_SPLIT: Watch<CriticalSectionRawMutex, [KeyPos; MATRIX_KEY
 pub static MESSAGE_TO_PERI: Watch<CriticalSectionRawMutex, [u8; 6], 2> = Watch::new();
 
 /// Shared variable for battery percentage information
-pub static BATTERY_PERCENT: Watch<CriticalSectionRawMutex, u8, 2> = Watch::new();
+pub static BATTERY_LEVEL: Watch<CriticalSectionRawMutex, u8, 3> = Watch::new();
 
 use embassy_time::{Duration, Timer};
 
