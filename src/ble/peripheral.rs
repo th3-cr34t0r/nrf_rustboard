@@ -34,7 +34,7 @@ use crate::config::COLS;
 use crate::config::MATRIX_KEYS_BUFFER;
 use crate::matrix::KeyPos;
 use crate::storage::{load_bonding_info, store_bonding_info};
-use crate::{BATTERY_PERCENT, MATRIX_KEYS_SPLIT};
+use crate::{BATTERY_LEVEL, MATRIX_KEYS_SPLIT};
 
 use ssmarshal::{self, serialize};
 
@@ -278,9 +278,11 @@ async fn gatt_split_events_handler<'stack, 'server>(
     server: &'server Server<'_>,
 ) -> Result<(), Error> {
     let split_service_registered_keys = server.split_service.registered_keys;
+    let split_service_battery_level = server.split_service.level;
 
     let matrix_keys_split_sender = MATRIX_KEYS_SPLIT.sender();
     let mut matrix_keys_split_local = [KeyPos::default(); MATRIX_KEYS_BUFFER];
+    let battery_level_sender = BATTERY_LEVEL.sender();
 
     let _reason = loop {
         match conn.next().await {
@@ -330,6 +332,34 @@ async fn gatt_split_events_handler<'stack, 'server>(
                             }
                             // send the new matrix_keys
                             matrix_keys_split_sender.send(matrix_keys_split_local);
+
+                            #[cfg(feature = "defmt")]
+                            info!(
+                                "[split_registered_keys] received: {:?}",
+                                matrix_keys_split_local
+                            );
+                        }
+
+                        // split battery level information
+                        if event.handle() == split_service_battery_level.handle {
+                            let split_battery_level = event.data();
+
+                            for split_b_level in split_battery_level {
+                                if let Some(b_level) = battery_level_sender.try_get() {
+                                    // send only the lower value (either peripheral or central battery level)
+                                    if *split_b_level < b_level {
+                                        battery_level_sender.send(*split_b_level);
+                                    }
+
+                                    #[cfg(feature = "defmt")]
+                                    info!(
+                                        "[split_battery_level] central bat lvl: {:?}; peri bat lvl: {:?}",
+                                        split_b_level, b_level
+                                    );
+                                }
+                            }
+                            #[cfg(feature = "defmt")]
+                            info!("[split_battery_level] central bat lvl rcvd",);
                         }
 
                         if conn
@@ -475,7 +505,7 @@ async fn battery_service_task<'stack, 'server>(
 ) {
     let battery_characteristic = server.battery_service.level;
 
-    let mut battery_percantage_receiver = BATTERY_PERCENT
+    let mut battery_percantage_receiver = BATTERY_LEVEL
         .receiver()
         .expect("[battery_service_task] failed to create receiver");
 
@@ -520,7 +550,7 @@ async fn hid_kb_service_task<'stack, 'server>(
 
         let _n = serialize(&mut buff, &key_report).unwrap();
 
-        match server.hid_service.input_keyboard.notify(conn, &buff).await {
+        match server.hid_service.report.notify(conn, &buff).await {
             Ok(_) => {
                 #[cfg(feature = "defmt")]
                 info!("[notify] input keyboard notified successfully")
