@@ -8,9 +8,9 @@ use usbd_hid::descriptor::KeyboardReport;
 #[cfg(feature = "peripheral")]
 use crate::{
     KEY_REPORT, MATRIX_KEYS_SPLIT,
-    config::{COLS, LAYERS, ROWS},
     keycodes::KeyType,
     keymap::provide_keymap,
+    {COLS, LAYERS, ROWS},
 };
 
 #[cfg(feature = "central")]
@@ -228,8 +228,9 @@ impl KeyProvision {
     #[cfg(feature = "peripheral")]
     /// Provision combo keys
     async fn provision_combos(&mut self, matrix_keys_local: &mut [Key; MATRIX_KEYS_COMB_BUFFER]) {
-        let keys_to_remove: Vec<KC, MATRIX_KEYS_COMB_BUFFER> = Vec::from([KC::LCtrl, KC::Dd]);
-        let keys_to_add: Vec<KC, MATRIX_KEYS_COMB_BUFFER> = Vec::from([KC::LCtrl, KC::Backspace]);
+        let keys_to_remove: Vec<KC, { MATRIX_KEYS_COMB_BUFFER }> = Vec::from([KC::LCtrl, KC::Dd]);
+        let keys_to_add: Vec<KC, { MATRIX_KEYS_COMB_BUFFER }> =
+            Vec::from([KC::LCtrl, KC::Backspace]);
 
         // check if all combo keys to remove are contained in the matrix keys
         if keys_to_remove.iter().all(|remove_k| {
@@ -262,7 +263,7 @@ impl KeyProvision {
 
         let mut matrix_keys_local = [Key::default(); MATRIX_KEYS_COMB_BUFFER];
         // let mut matrix_keys_local: Vec<Key, { MATRIX_KEYS_COMB_BUFFER }> = Vec::new();
-        let mut keys_to_remove: Vec<Key, MATRIX_KEYS_COMB_BUFFER> = Vec::new();
+        let mut keys_to_remove: Vec<Key, { MATRIX_KEYS_COMB_BUFFER }> = Vec::new();
 
         loop {
             #[cfg(feature = "peripheral")]

@@ -29,19 +29,18 @@ use crate::battery::Battery;
 use crate::ble::ble_task;
 use crate::ble::get_device_address;
 use crate::ble::services::SPLIT_SERVICE;
-use crate::config::BLE_NAME;
-use crate::config::COLS;
 use crate::config::MATRIX_KEYS_BUFFER;
 use crate::matrix::KeyPos;
 use crate::storage::{load_bonding_info, store_bonding_info};
 use crate::{BATTERY_LEVEL, MATRIX_KEYS_SPLIT};
+use crate::{COLS, NAME, SPLIT};
 
 use ssmarshal::{self, serialize};
 
 use crate::ble::services::Server;
 use crate::{KEY_REPORT, delay_ms};
 
-const CONNECTIONS_MAX: usize = 2;
+const CONNECTIONS_MAX: usize = SPLIT as usize + 2;
 
 const L2CAP_CHANNELS_MAX: usize = CONNECTIONS_MAX * 4;
 
@@ -100,7 +99,7 @@ pub async fn ble_peripheral_run<RNG, S>(
 
     // create the server
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
-        name: BLE_NAME,
+        name: NAME,
         appearance: &appearance::human_interface_device::KEYBOARD,
     }))
     .expect("Failed to create GATT Server");
@@ -231,7 +230,7 @@ async fn advertise_hid<'a, 'b>(
                 HUMAN_INTERFACE_DEVICE.to_le_bytes(),
                 SPLIT_SERVICE.to_le_bytes(),
             ]),
-            AdStructure::CompleteLocalName(BLE_NAME.as_bytes()),
+            AdStructure::CompleteLocalName(NAME.as_bytes()),
             AdStructure::Unknown {
                 ty: 0x19,
                 data: &trouble_host::prelude::appearance::human_interface_device::KEYBOARD

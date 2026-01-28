@@ -1,5 +1,6 @@
-use crate::config::{COLS, ENTER_SLEEP_DEBOUNCE, KEY_DEBOUNCE, MATRIX_KEYS_BUFFER, ROWS};
+use crate::config::{ENTER_SLEEP_DEBOUNCE, MATRIX_KEYS_BUFFER};
 use crate::keycodes::KC;
+use crate::{COLS, KEY_DEBOUNCE, ROWS};
 use crate::{MATRIX_KEYS_LOCAL, delay_ms, delay_us};
 
 use core::pin::pin;
@@ -7,7 +8,7 @@ use core::pin::pin;
 use defmt::{Format, info};
 use embassy_futures::select::{Either, select, select_slice};
 use embassy_nrf::gpio::{Input, Output};
-use embassy_time::Instant;
+use embassy_time::{Duration, Instant};
 use heapless::Vec;
 
 #[cfg_attr(feature = "defmt", derive(Format))]
@@ -95,7 +96,7 @@ impl<'a> Matrix<'a> {
             .iter_mut()
             .filter(|c_key| c_key.keypos != KeyPos::default())
         {
-            if instant >= c_key.time + KEY_DEBOUNCE {
+            if instant >= c_key.time + Duration::from_millis(KEY_DEBOUNCE) {
                 #[cfg(feature = "defmt")]
                 info!("[debounce] debounced key: {:?}", c_key.keypos);
                 c_key.keypos = KeyPos::default();

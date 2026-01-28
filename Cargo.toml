@@ -51,6 +51,11 @@ serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 ssmarshal = {version = "1.0.0", default-features = false}
 heapless = "0.9.1"
 
+[build-dependencies]
+toml = { version = "0.9.11", default-featres = false, features = ["serde"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+const-gen = "1.6.8"
+
 [profile.release]
 debug = 2
 

@@ -48,3 +48,6 @@ pub async fn delay_us(delay: u64) {
     let duration = Duration::from_micros(delay);
     Timer::after(duration).await;
 }
+
+// It includes the user_config.toml variables evaluated on compile time
+include!(concat!(env!("OUT_DIR"), "/constants.rs"));

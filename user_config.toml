@@ -1,0 +1,18 @@
+[ble]
+name = "Rustboard"
+split = true
+
+[matrix]
+rows = 4
+cols = 5
+# To be implemented: pins parsing
+# row_pins = []
+# col_pins = []
+
+[debounce]
+key_debounce = 10 # in ms
+
+[keymap]
+layers = 2
+# To be implemented: keymap layout parsing
+# keymap = []
